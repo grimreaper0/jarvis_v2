@@ -501,3 +501,9 @@ class RevenueGraphRunner:
 
             except Exception as loop_exc:
                 log.error("revenue_runner.loop_error", error=str(loop_exc))
+
+import asyncio
+
+if __name__ == "__main__":
+    asyncio.run(RevenueGraphRunner().run_forever())
+

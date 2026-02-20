@@ -380,3 +380,9 @@ class TradingGraphRunner:
 
             except Exception as loop_exc:
                 log.error("trading_runner.loop_error", error=str(loop_exc))
+
+import asyncio
+
+if __name__ == "__main__":
+    asyncio.run(TradingGraphRunner().run_forever())
+

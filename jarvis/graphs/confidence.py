@@ -421,3 +421,9 @@ class ConfidenceGraphRunner:
 
             except Exception as loop_exc:
                 log.error("confidence_runner.loop_error", error=str(loop_exc))
+
+import asyncio
+
+if __name__ == "__main__":
+    asyncio.run(ConfidenceGraphRunner().run_forever())
+

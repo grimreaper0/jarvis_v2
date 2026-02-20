@@ -8,5 +8,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/unit/ -v --tb=short
+      - name: Upgrade pip + setuptools
+        run: pip install --upgrade pip setuptools wheel
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-cov pydantic pydantic-settings structlog langgraph langchain langchain-community langchain-ollama httpx python-dotenv keyring
+      - name: Run unit tests
+        run: PYTHONPATH=. pytest tests/unit/ -v --tb=short
