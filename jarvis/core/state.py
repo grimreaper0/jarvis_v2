@@ -1,6 +1,6 @@
 """TypedDict state models for LangGraph graphs."""
 from typing import Annotated, Any
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, NotRequired
 from langgraph.graph.message import add_messages
 
 
@@ -45,3 +45,4 @@ class ConfidenceState(BaseState):
     reflexive_score: float
     final_score: float
     decision: str  # "execute" | "delegate" | "clarify"
+    user_decision: NotRequired[str | None]  # set after interrupt() resume in clarify_node

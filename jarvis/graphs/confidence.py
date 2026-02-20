@@ -25,6 +25,7 @@ from uuid import uuid4
 import structlog
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import interrupt
 
 from jarvis.core.state import ConfidenceState
 
@@ -269,6 +270,56 @@ async def finalize(state: ConfidenceState) -> dict[str, Any]:
     return {"final_score": final, "decision": decision}
 
 
+async def clarify_node(state: ConfidenceState) -> dict[str, Any]:
+    """Human-in-the-loop: pause execution and surface decision to operator.
+
+    Called only when confidence < confidence_delegate threshold (<0.60).
+    Graph execution is frozen here until the caller resumes via:
+
+        graph.ainvoke(Command(resume=user_choice), config=thread_config)
+
+    The resume value becomes `user_decision` and overrides `decision` so
+    downstream code sees what the operator actually chose.
+    """
+    task_meta = _extract_task_meta(state)
+    task_type = task_meta.get("task_type", "unknown")
+    final_score = state.get("final_score", 0.0)
+
+    # Pause graph — caller receives this dict via get_state().tasks[0].interrupts[0].value
+    user_choice = interrupt({
+        "question": (
+            f"Confidence too low ({final_score:.0%}) to act autonomously on '{task_type}'. "
+            f"What should I do?"
+        ),
+        "options": ["execute", "delegate", "skip", "abort"],
+        "context": {
+            "task_type": task_type,
+            "confidence": final_score,
+            "layers": {
+                "base": state.get("base_score"),
+                "validation": state.get("validation_score"),
+                "historical": state.get("historical_score"),
+                "reflexive": state.get("reflexive_score"),
+            },
+        },
+    })
+
+    log.info(
+        "confidence.clarify.resumed",
+        user_choice=user_choice,
+        task_type=task_type,
+    )
+    return {"decision": user_choice, "user_decision": user_choice}
+
+
+def _route_after_finalize(state: ConfidenceState) -> str:
+    """Conditional edge from finalize: execute/delegate go to END, clarify pauses."""
+    decision = state.get("decision", "clarify")
+    if decision in ("execute", "delegate"):
+        return decision
+    return "clarify"
+
+
 # ─────────────────────────── Helpers ─────────────────────────────────────────
 
 
@@ -304,7 +355,14 @@ def _extract_task_meta(state: ConfidenceState) -> dict[str, Any]:
 
 
 def build_confidence_graph():
-    """Build and compile the 4-layer confidence evaluation subgraph."""
+    """Build and compile the 4-layer confidence evaluation subgraph.
+
+    Flow:
+        score_base → score_validation → score_historical → score_reflexive → finalize
+            ├── execute  → END  (confidence >= 0.90)
+            ├── delegate → END  (confidence 0.60-0.89)
+            └── clarify  → clarify_node → END  (confidence < 0.60, interrupt() called)
+    """
     graph = StateGraph(ConfidenceState)
 
     graph.add_node("score_base", score_base)
@@ -312,13 +370,24 @@ def build_confidence_graph():
     graph.add_node("score_historical", score_historical)
     graph.add_node("score_reflexive", score_reflexive)
     graph.add_node("finalize", finalize)
+    graph.add_node("clarify_node", clarify_node)
 
     graph.set_entry_point("score_base")
     graph.add_edge("score_base", "score_validation")
     graph.add_edge("score_validation", "score_historical")
     graph.add_edge("score_historical", "score_reflexive")
     graph.add_edge("score_reflexive", "finalize")
-    graph.add_edge("finalize", END)
+
+    graph.add_conditional_edges(
+        "finalize",
+        _route_after_finalize,
+        {
+            "execute": END,
+            "delegate": END,
+            "clarify": "clarify_node",
+        },
+    )
+    graph.add_edge("clarify_node", END)
 
     checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
@@ -385,10 +454,35 @@ class ConfidenceGraphRunner:
                     "reflexive_score": 0.0,
                     "final_score": 0.0,
                     "decision": "clarify",
+                    "user_decision": None,
                 }
 
                 try:
                     result = await self.graph.ainvoke(initial_state, config=config)
+
+                    # Check if graph was interrupted (confidence too low, needs human input)
+                    snapshot = self.graph.get_state(config)
+                    if snapshot.next:
+                        interrupt_val: dict = {}
+                        for task_info in snapshot.tasks:
+                            if task_info.interrupts:
+                                interrupt_val = task_info.interrupts[0].value
+                                break
+                        log.warning(
+                            "confidence_runner.interrupted",
+                            thread_id=thread_id,
+                            question=interrupt_val.get("question"),
+                        )
+                        reply_queue: str | None = task.get("reply_queue")
+                        if reply_queue:
+                            reply = json.dumps({
+                                "id": thread_id,
+                                "status": "waiting_for_input",
+                                "interrupt": interrupt_val,
+                            })
+                            await r.rpush(reply_queue, reply)
+                        continue
+
                     log.info(
                         "confidence_runner.completed",
                         thread_id=thread_id,
@@ -397,11 +491,12 @@ class ConfidenceGraphRunner:
                     )
 
                     # Optionally push result back to a response queue
-                    reply_queue: str | None = task.get("reply_queue")
+                    reply_queue = task.get("reply_queue")
                     if reply_queue:
                         reply = json.dumps(
                             {
                                 "id": thread_id,
+                                "status": "complete",
                                 "base_score": result.get("base_score"),
                                 "validation_score": result.get("validation_score"),
                                 "historical_score": result.get("historical_score"),
