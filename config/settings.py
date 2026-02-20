@@ -63,8 +63,8 @@ class Settings(BaseSettings):
     confidence_execute: float = 0.90
     confidence_delegate: float = 0.60
 
-    # FastAPI server
-    api_port: int = 8504
+    # FastAPI server — FIXED at 8506, do not change
+    api_port: int = 8506
 
     # Application metadata
     app_name: str = "jarvis-v2"
