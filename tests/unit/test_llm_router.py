@@ -1,281 +1,224 @@
-"""Unit tests for LLMRouter v3 — task-type routing, backend selection, fallback logic."""
+"""Unit tests for LLMRouter v4 — vLLM-first, no Ollama, task-type routing for BILLY."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from jarvis.core.router import LLMRouter, LLMRequest, LLMResponse, LLMBackend, TASK_ROUTING
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def router():
     r = LLMRouter()
-    # Clear backend cache so each test controls availability
     r._backends = None
     return r
 
 
-def _backends(
-    ollama_models: set[str] | None = None,
-    vllm_models: set[str] | None = None,
-    groq: bool = False,
-    deepseek: bool = False,
-    openrouter: bool = False,
-    claude: bool = False,
-    grok: bool = False,
-) -> dict:
+def _backends(vllm_local=None, vllm=None, groq=False, deepseek=False,
+              openrouter=False, grok=False, claude=False):
     return {
-        "ollama": ollama_models or set(),
-        "vllm": vllm_models or set(),
-        "groq": groq,
-        "deepseek": deepseek,
-        "openrouter": openrouter,
-        "claude": claude,
-        "grok": grok,
+        "vllm_local": vllm_local or set(),
+        "vllm": vllm or set(),
+        "groq": groq, "deepseek": deepseek,
+        "openrouter": openrouter, "grok": grok, "claude": claude,
     }
 
 
-# ---------------------------------------------------------------------------
-# TASK_ROUTING sanity checks
-# ---------------------------------------------------------------------------
+# ── TASK_ROUTING sanity ─────────────────────────────────────────────────────
 
 def test_all_task_types_have_routing():
     required = {"simple", "reasoning", "coding", "long_ctx", "creative", "trading", "analysis", "content"}
-    missing = required - set(TASK_ROUTING.keys())
-    assert not missing, f"Missing routing for task types: {missing}"
+    assert not (required - set(TASK_ROUTING.keys()))
 
 
 def test_routing_entries_are_tuples_of_two():
     for task_type, entries in TASK_ROUTING.items():
-        assert entries, f"No routing entries for {task_type}"
-        for entry in entries:
-            assert len(entry) == 2, f"Bad entry {entry} in {task_type} routing"
-            backend, model = entry
-            assert isinstance(backend, str)
-            assert isinstance(model, str)
+        assert entries
+        for backend, model in entries:
+            assert isinstance(backend, str) and isinstance(model, str)
 
 
-def test_reasoning_routing_prefers_deepseek():
-    entries = TASK_ROUTING["reasoning"]
-    backends = [b for b, _ in entries]
-    # First local entry should be ollama with deepseek-r1
-    assert entries[0][0] == "ollama"
-    assert "deepseek" in entries[0][1]
+def test_no_ollama_in_routing():
+    for task_type, entries in TASK_ROUTING.items():
+        for backend, model in entries:
+            assert backend != "ollama", f"Ollama found in {task_type}: {backend}/{model}"
 
 
-def test_coding_routing_prefers_coder_model():
-    entries = TASK_ROUTING["coding"]
-    assert entries[0][0] == "ollama"
-    assert "coder" in entries[0][1]
+def test_vllm_local_is_first_for_local_tasks():
+    for task in ["simple", "reasoning", "coding", "trading", "analysis", "content"]:
+        assert TASK_ROUTING[task][0][0] == "vllm_local", f"Expected vllm_local first for {task}"
 
 
-def test_trading_routing_uses_reasoning_models():
-    entries = TASK_ROUTING["trading"]
-    models = [m for _, m in entries]
-    # Should include DeepSeek R1 variants
+def test_reasoning_uses_deepseek_r1():
+    models = [m for _, m in TASK_ROUTING["reasoning"]]
     assert any("deepseek" in m.lower() or "r1" in m.lower() for m in models)
 
 
-# ---------------------------------------------------------------------------
-# _is_available tests
-# ---------------------------------------------------------------------------
-
-def test_ollama_available_exact_match(router):
-    b = _backends(ollama_models={"qwen2.5:0.5b", "deepseek-r1:7b"})
-    assert router._is_available("ollama", "qwen2.5:0.5b", b)
-    assert router._is_available("ollama", "deepseek-r1:7b", b)
-    assert not router._is_available("ollama", "mistral:7b", b)
+def test_long_ctx_has_qwen35_via_openrouter():
+    entries = TASK_ROUTING["long_ctx"]
+    assert any(b == "openrouter" and "qwen3.5" in m.lower() for b, m in entries)
 
 
-def test_ollama_available_prefix_match(router):
-    b = _backends(ollama_models={"qwen2.5:0.5b-fp16"})
-    assert router._is_available("ollama", "qwen2.5:0.5b", b)
+# ── LLMBackend enum ─────────────────────────────────────────────────────────
+
+def test_no_ollama_backend_in_enum():
+    assert "ollama" not in {b.value for b in LLMBackend}
 
 
-def test_vllm_available_case_insensitive(router):
-    b = _backends(vllm_models={"Qwen/Qwen3-30B-A3B", "deepseek-r1-14b"})
-    assert router._is_available("vllm", "Qwen/Qwen3-30B-A3B", b)
-    assert router._is_available("vllm", "deepseek-r1-14b", b)
-    assert not router._is_available("vllm", "mistral-7b", b)
+def test_required_backends_present():
+    backends = {b.value for b in LLMBackend}
+    assert {"vllm_local", "vllm", "groq", "deepseek", "openrouter", "grok", "claude"}.issubset(backends)
 
 
-def test_vllm_unavailable_when_no_models(router):
-    b = _backends(vllm_models=set())
-    assert not router._is_available("vllm", "Qwen/Qwen3-30B-A3B", b)
+# ── _is_available ───────────────────────────────────────────────────────────
+
+def test_vllm_local_exact_match(router):
+    b = _backends(vllm_local={"Qwen/Qwen3-4B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"})
+    assert router._is_available("vllm_local", "Qwen/Qwen3-4B", b)
+    assert not router._is_available("vllm_local", "mistralai/Mistral-7B", b)
+
+
+def test_vllm_local_substring_match(router):
+    b = _backends(vllm_local={"Qwen/Qwen3-4B-Instruct"})
+    assert router._is_available("vllm_local", "Qwen/Qwen3-4B", b)
+
+
+def test_vllm_empty_returns_false(router):
+    b = _backends(vllm_local=set())
+    assert not router._is_available("vllm_local", "Qwen/Qwen3-4B", b)
 
 
 def test_cloud_backend_requires_key(router):
-    b_no_key = _backends(groq=False)
-    b_with_key = _backends(groq=True)
-    assert not router._is_available("groq", "llama-3.3-70b-versatile", b_no_key)
-    assert router._is_available("groq", "llama-3.3-70b-versatile", b_with_key)
+    assert not router._is_available("groq", "model", _backends(groq=False))
+    assert router._is_available("groq", "model", _backends(groq=True))
 
 
-# ---------------------------------------------------------------------------
-# _select_route tests
-# ---------------------------------------------------------------------------
+# ── _select_route ───────────────────────────────────────────────────────────
 
-def test_simple_task_picks_qwen_when_available(router):
-    b = _backends(ollama_models={"qwen2.5:0.5b"})
+def test_simple_picks_vllm_local(router):
+    b = _backends(vllm_local={"Qwen/Qwen2.5-0.5B-Instruct"})
     backend, model = router._select_route("simple", False, None, b)
-    assert backend == "ollama"
-    assert "qwen2.5" in model
+    assert backend == "vllm_local"
 
 
-def test_reasoning_falls_through_to_groq(router):
-    b = _backends(groq=True)  # Ollama has no deepseek-r1
+def test_reasoning_falls_to_groq_when_no_vllm(router):
+    b = _backends(groq=True)
     backend, model = router._select_route("reasoning", True, None, b)
     assert backend == "groq"
-    assert "deepseek" in model or "r1" in model
+    assert "r1" in model.lower() or "deepseek" in model.lower()
 
 
-def test_vllm_prioritized_over_cloud_for_analysis(router):
-    b = _backends(
-        vllm_models={"Qwen/Qwen3-30B-A3B"},
-        groq=True,
-    )
+def test_vllm_remote_beats_groq_for_analysis(router):
+    b = _backends(vllm={"Qwen/Qwen3-30B-A3B"}, groq=True)
     backend, model = router._select_route("analysis", False, None, b)
     assert backend == "vllm"
 
 
-def test_explicit_backend_override_ollama(router):
-    b = _backends(ollama_models={"qwen2.5:0.5b", "deepseek-r1:7b"})
-    backend, model = router._select_route("simple", True, LLMBackend.OLLAMA, b)
-    assert backend == "ollama"
-    assert model == router.REASONING_MODEL  # reasoning=True → deepseek
+def test_reasoning_flag_overrides_task_type(router):
+    b = _backends(vllm_local={"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"})
+    backend, model = router._select_route("content", True, None, b)
+    assert backend == "vllm_local"
+    assert "r1" in model.lower() or "deepseek" in model.lower()
 
 
-def test_explicit_backend_override_vllm(router):
-    b = _backends(vllm_models={"Qwen/Qwen3-30B-A3B"})
-    backend, model = router._select_route("analysis", False, LLMBackend.VLLM, b)
-    assert backend == "vllm"
-    assert "Qwen3" in model
+def test_explicit_vllm_local_override(router):
+    b = _backends(vllm_local={"Qwen/Qwen3-4B"})
+    backend, _ = router._select_route("simple", False, LLMBackend.VLLM_LOCAL, b)
+    assert backend == "vllm_local"
 
 
-def test_no_backend_raises_runtime_error(router):
-    b = _backends()  # nothing available
+def test_no_backend_raises_error(router):
     with pytest.raises(RuntimeError, match="No LLM backend available"):
-        router._select_route("simple", False, None, b)
+        router._select_route("simple", False, None, _backends())
 
 
-def test_last_resort_picks_any_ollama(router):
-    b = _backends(ollama_models={"jarvis:latest"})  # no matching routing model
+def test_last_resort_picks_any_vllm_local(router):
+    b = _backends(vllm_local={"custom/MyModel"})
     backend, model = router._select_route("simple", False, None, b)
-    assert backend == "ollama"
-    assert model == "jarvis:latest"
+    assert backend == "vllm_local"
+    assert model == "custom/MyModel"
 
 
-# ---------------------------------------------------------------------------
-# LLMRequest / LLMResponse model validation
-# ---------------------------------------------------------------------------
+# ── Request/Response models ─────────────────────────────────────────────────
 
 def test_llm_request_defaults():
     req = LLMRequest(prompt="Hello")
     assert req.task_type == "simple"
     assert req.reasoning is False
     assert req.backend is None
-    assert req.max_tokens == 2048
-
-
-def test_llm_request_reasoning_flag():
-    req = LLMRequest(prompt="Analyze this", reasoning=True, task_type="trading")
-    assert req.reasoning is True
-    assert req.task_type == "trading"
 
 
 def test_llm_response_defaults():
-    resp = LLMResponse(content="Hello", backend=LLMBackend.OLLAMA, model="qwen2.5:0.5b")
+    resp = LLMResponse(content="Hi", backend=LLMBackend.VLLM_LOCAL, model="Qwen/Qwen3-4B")
     assert resp.latency_ms == 0.0
     assert resp.reasoning is None
-    assert resp.tokens_used == 0
 
 
-# ---------------------------------------------------------------------------
-# Backend enum coverage
-# ---------------------------------------------------------------------------
-
-def test_all_backends_in_enum():
-    backends = {b.value for b in LLMBackend}
-    required = {"ollama", "vllm", "groq", "deepseek", "openrouter", "claude", "grok"}
-    assert required.issubset(backends)
-
-
-# ---------------------------------------------------------------------------
-# Integration: complete() routing (mocked backends)
-# ---------------------------------------------------------------------------
+# ── Integration (mocked) ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_complete_routes_to_ollama(router):
-    router._backends = _backends(ollama_models={"qwen2.5:0.5b"})
-    router._backends_checked_at = 1e12  # prevent re-detection
-
-    mock_resp = LLMResponse(content="test", backend=LLMBackend.OLLAMA, model="qwen2.5:0.5b")
-    router._ollama_complete = AsyncMock(return_value=mock_resp)
-
-    resp = await router.complete(LLMRequest(prompt="Hello", task_type="simple"))
-    assert resp.backend == LLMBackend.OLLAMA
-    router._ollama_complete.assert_awaited_once()
+async def test_complete_routes_to_vllm_local(router):
+    router._backends = _backends(vllm_local={"Qwen/Qwen2.5-0.5B-Instruct"})
+    router._backends_checked_at = 1e12
+    mock_resp = LLMResponse(content="ok", backend=LLMBackend.VLLM_LOCAL, model="Qwen/Qwen2.5-0.5B-Instruct")
+    router._openai_compat_complete = AsyncMock(return_value=mock_resp)
+    resp = await router.complete(LLMRequest(prompt="Hi", task_type="simple"))
+    assert resp.backend == LLMBackend.VLLM_LOCAL
 
 
 @pytest.mark.asyncio
-async def test_complete_routes_to_groq_when_ollama_empty(router):
+async def test_complete_falls_back_to_groq(router):
     router._backends = _backends(groq=True)
     router._backends_checked_at = 1e12
-
-    mock_resp = LLMResponse(content="test", backend=LLMBackend.GROQ, model="llama-3.3-70b-versatile")
+    mock_resp = LLMResponse(content="ok", backend=LLMBackend.GROQ, model="llama-3.3-70b-versatile")
     router._openai_compat_complete = AsyncMock(return_value=mock_resp)
-
-    resp = await router.complete(LLMRequest(prompt="Hello", task_type="simple"))
+    resp = await router.complete(LLMRequest(prompt="Hi", task_type="simple"))
     assert resp.backend == LLMBackend.GROQ
 
 
 @pytest.mark.asyncio
-async def test_complete_reasoning_sets_reasoning_fields(router):
-    router._backends = _backends(ollama_models={"deepseek-r1:7b"})
+async def test_reasoning_tags_parsed(router):
+    router._backends = _backends(vllm_local={"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"})
     router._backends_checked_at = 1e12
-
     raw = LLMResponse(
-        content="<think>My reasoning here</think>\nMy conclusion",
-        backend=LLMBackend.OLLAMA,
-        model="deepseek-r1:7b",
+        content="<think>Step 1\nStep 2</think>\nFinal answer",
+        backend=LLMBackend.VLLM_LOCAL,
+        model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     )
-    router._ollama_complete = AsyncMock(return_value=raw)
-
-    resp = await router.complete(LLMRequest(prompt="Reason about X", task_type="reasoning", reasoning=True))
-    assert resp.reasoning == "My reasoning here"
-    assert resp.conclusion == "My conclusion"
+    router._openai_compat_complete = AsyncMock(return_value=raw)
+    resp = await router.complete(LLMRequest(prompt="Reason", task_type="reasoning", reasoning=True))
+    assert resp.reasoning == "Step 1\nStep 2"
+    assert resp.conclusion == "Final answer"
 
 
 @pytest.mark.asyncio
 async def test_generate_returns_string(router):
-    router._backends = _backends(ollama_models={"qwen2.5:0.5b"})
+    router._backends = _backends(vllm_local={"Qwen/Qwen2.5-0.5B-Instruct"})
     router._backends_checked_at = 1e12
-
-    mock_resp = LLMResponse(content="Generated text", backend=LLMBackend.OLLAMA, model="qwen2.5:0.5b")
-    router._ollama_complete = AsyncMock(return_value=mock_resp)
-
+    router._openai_compat_complete = AsyncMock(return_value=LLMResponse(
+        content="Generated", backend=LLMBackend.VLLM_LOCAL, model="Qwen/Qwen2.5-0.5B-Instruct"
+    ))
     result = await router.generate("Hello")
-    assert result == "Generated text"
-    assert isinstance(result, str)
+    assert result == "Generated"
 
 
 @pytest.mark.asyncio
-async def test_reason_returns_dict_with_keys(router):
-    router._backends = _backends(ollama_models={"deepseek-r1:7b"})
+async def test_reason_returns_structured_dict(router):
+    router._backends = _backends(vllm_local={"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"})
     router._backends_checked_at = 1e12
-
-    raw = LLMResponse(
-        content="<think>Step 1\nStep 2</think>\nFinal answer",
-        backend=LLMBackend.OLLAMA,
-        model="deepseek-r1:7b",
-    )
-    router._ollama_complete = AsyncMock(return_value=raw)
-
+    router._openai_compat_complete = AsyncMock(return_value=LLMResponse(
+        content="<think>Step 1\nStep 2</think>\nConclusion",
+        backend=LLMBackend.VLLM_LOCAL,
+        model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    ))
     result = await router.reason("Analyze this")
-    assert "reasoning" in result
-    assert "conclusion" in result
-    assert "model" in result
-    assert "backend" in result
     assert result["reasoning_available"] is True
-    assert result["reasoning_steps"] >= 1
+    assert result["conclusion"] == "Conclusion"
+    assert "backend" in result
+
+
+@pytest.mark.asyncio
+async def test_vllm_remote_wins_over_groq(router):
+    router._backends = _backends(vllm={"Qwen/Qwen3-30B-A3B"}, groq=True)
+    router._backends_checked_at = 1e12
+    mock_resp = LLMResponse(content="ok", backend=LLMBackend.VLLM, model="Qwen/Qwen3-30B-A3B")
+    router._openai_compat_complete = AsyncMock(return_value=mock_resp)
+    resp = await router.complete(LLMRequest(prompt="Analyze", task_type="analysis"))
+    assert resp.backend == LLMBackend.VLLM

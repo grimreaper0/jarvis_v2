@@ -26,26 +26,27 @@ class Settings(BaseSettings):
     # Redis coordination layer
     redis_url: str = "redis://localhost:6379"
 
-    # Ollama (local, $0 cost)
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model_fast: str = "qwen2.5:0.5b"        # 397MB  — simple/fast tasks
-    ollama_model_reason: str = "deepseek-r1:7b"    # 4.7GB  — reasoning/trading
-    ollama_model_coding: str = "qwen2.5-coder:1.5b"  # 986MB  — coding tasks
-    ollama_model_general: str = "llama3.2:3b"      # 2.0GB  — general tasks
-    ollama_model_writing: str = "mistral:7b"       # 4.1GB  — creative/writing
-    ollama_model_longctx: str = "qwen2.5:14b"      # 8.5GB  — long-context (optional)
+    # vLLM Local — Mac Studio M2 Max (primary inference server, replaces Ollama)
+    # Start: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000
+    # Models served here use HuggingFace model IDs (not Ollama short names)
+    vllm_local_base_url: str = "http://localhost:8000/v1"
 
-    # Free cloud LLM APIs (add keys via: python3 -c "import keyring; keyring.set_password('jarvis_v2', '<key_name>', '<value>')")
+    # vLLM Remote — AWS g5.xlarge GPU instance (on-demand, stop when not needed)
+    # Models: Qwen3.5-397B-A17B, Qwen3-30B-A3B, DeepSeek-R1-14B, Devstral-24B
+    # Set via: keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')
+    # Stop instance to save ~$730/mo, start when heavy inference needed
+    vllm_base_url: str = ""   # populated from Keychain at runtime
+
+    # Ollama — legacy fallback only (used if vLLM local is not running)
+    ollama_base_url: str = "http://localhost:11434"
+
+    # Free cloud LLM APIs (add keys via: keyring.set_password('jarvis_v2', '<key_name>', '<value>'))
     # Groq — https://console.groq.com (free tier, no CC, 70B inference)
     groq_base_url: str = "https://api.groq.com/openai/v1"
     # DeepSeek — https://platform.deepseek.com (V3.2 + R1 reasoning, $0.07/M tokens)
     deepseek_base_url: str = "https://api.deepseek.com"
-    # OpenRouter — https://openrouter.ai (free model pool: Qwen3-235B, Llama 3.1, etc.)
+    # OpenRouter — https://openrouter.ai (free model pool: Qwen3.5, Llama 3.1, etc.)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    # vLLM — AWS g5.xlarge GPU instance (Qwen3-30B, DeepSeek-R1-14B, Devstral-24B)
-    # Set via: python3 -c "import keyring; keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')"
-    # Stop instance to save ~$730/mo, start when heavy inference needed
-    vllm_base_url: str = ""   # populated from Keychain at runtime
 
     # External LLM API keys (stored in Keychain; env vars as override/CI fallback)
     anthropic_api_key: str = ""
