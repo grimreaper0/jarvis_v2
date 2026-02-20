@@ -1,7 +1,9 @@
 """FastAPI server — REST interface for jarvis_v2 graphs and workers."""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from typing import Any
 import structlog
 
 log = structlog.get_logger()
@@ -42,6 +44,18 @@ class TradingSignalRequest(BaseModel):
     price: float
     qty: int
     strategy: str = "vwap_mean_reversion"
+
+
+class ConfidenceEvalRequest(BaseModel):
+    task_type: str
+    description: str = ""
+    context: dict[str, Any] = {}
+    thread_id: str | None = None
+
+
+class ConfidenceResumeRequest(BaseModel):
+    thread_id: str
+    user_choice: str  # "execute" | "delegate" | "skip" | "abort"
 
 
 @app.get("/health")
@@ -124,3 +138,146 @@ async def worker_status() -> dict:
         log.warning("api.redis_unavailable", error=str(exc))
         status = {q: -1 for q in queues}
     return {"queues": status}
+
+
+@app.post("/confidence/evaluate")
+async def evaluate_confidence(request: ConfidenceEvalRequest) -> dict:
+    """Run 4-layer confidence scoring.
+
+    If confidence < 0.60, graph hits interrupt() and returns:
+        {"status": "waiting_for_input", "thread_id": "...", "interrupt": {...}}
+
+    Resume via POST /confidence/resume with same thread_id.
+    """
+    from jarvis.graphs.confidence import build_confidence_graph
+    from jarvis.core.state import ConfidenceState
+    from langchain_core.messages import HumanMessage
+    import json
+    from uuid import uuid4
+
+    graph = build_confidence_graph()
+    thread_id = request.thread_id or str(uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    task_message = HumanMessage(content=json.dumps({
+        "task_type": request.task_type,
+        "description": request.description,
+        "context": request.context,
+    }))
+
+    initial_state: ConfidenceState = {
+        "messages": [task_message],
+        "confidence": 0.0,
+        "error": None,
+        "base_score": 0.0,
+        "validation_score": 0.0,
+        "historical_score": 0.0,
+        "reflexive_score": 0.0,
+        "final_score": 0.0,
+        "decision": "clarify",
+        "user_decision": None,
+    }
+
+    result = await graph.ainvoke(initial_state, config=config)
+
+    # Check if graph was interrupted (confidence < 0.60 → clarify_node called interrupt())
+    snapshot = graph.get_state(config)
+    if snapshot.next:
+        interrupt_val: dict = {}
+        for task_info in snapshot.tasks:
+            if task_info.interrupts:
+                interrupt_val = task_info.interrupts[0].value
+                break
+        log.info("confidence.api.interrupted", thread_id=thread_id)
+        return {
+            "status": "waiting_for_input",
+            "thread_id": thread_id,
+            "interrupt": interrupt_val,
+        }
+
+    log.info(
+        "confidence.api.complete",
+        thread_id=thread_id,
+        decision=result.get("decision"),
+        final_score=result.get("final_score"),
+    )
+    return {
+        "status": "complete",
+        "thread_id": thread_id,
+        "decision": result.get("decision"),
+        "final_score": result.get("final_score"),
+        "base_score": result.get("base_score"),
+        "validation_score": result.get("validation_score"),
+        "historical_score": result.get("historical_score"),
+        "reflexive_score": result.get("reflexive_score"),
+        "user_decision": result.get("user_decision"),
+    }
+
+
+@app.post("/confidence/resume")
+async def resume_confidence(request: ConfidenceResumeRequest) -> dict:
+    """Resume a confidence evaluation that was interrupted.
+
+    Pass the thread_id from /confidence/evaluate and the operator's choice.
+    The graph resumes from the clarify_node and routes to END with the chosen decision.
+    """
+    from jarvis.graphs.confidence import build_confidence_graph
+    from langgraph.types import Command
+
+    graph = build_confidence_graph()
+    config = {"configurable": {"thread_id": request.thread_id}}
+
+    # Check the thread exists and is actually waiting
+    snapshot = graph.get_state(config)
+    if not snapshot.next:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No interrupted graph found for thread_id={request.thread_id!r}. "
+                   "Either already completed or thread_id is wrong.",
+        )
+
+    result = await graph.ainvoke(Command(resume=request.user_choice), config=config)
+    log.info(
+        "confidence.api.resumed",
+        thread_id=request.thread_id,
+        user_choice=request.user_choice,
+        decision=result.get("decision"),
+    )
+    return {
+        "status": "complete",
+        "thread_id": request.thread_id,
+        "decision": result.get("decision"),
+        "user_decision": result.get("user_decision"),
+        "final_score": result.get("final_score"),
+    }
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_ui() -> HTMLResponse:
+    """LangGraph Admin UI — read-only system overview."""
+    from jarvis.api.admin import get_admin_html
+    return HTMLResponse(content=get_admin_html())
+
+
+@app.get("/admin/data")
+async def admin_data() -> dict:
+    """Admin config as JSON — all thresholds, LLM models, guardrail values."""
+    from config.settings import get_settings
+    from jarvis.api.admin import GRAPHS, WORKERS, AGENTS, GUARDRAILS, LLMS, PRIME_DIRECTIVES, COMMANDMENTS
+    settings = get_settings()
+    return {
+        "settings": {
+            "confidence_execute": settings.confidence_execute,
+            "confidence_delegate": settings.confidence_delegate,
+            "ollama_model_fast": settings.ollama_model_fast,
+            "ollama_model_reason": settings.ollama_model_reason,
+            "api_port": settings.api_port,
+            "app_version": settings.app_version,
+        },
+        "graphs": [{"name": g["name"], "queue": g["queue"], "file": g["file"]} for g in GRAPHS],
+        "workers": [{"name": w["name"], "queue": w["queue"]} for w in WORKERS],
+        "agents": [{"name": a["name"], "platform": a["platform"], "queue": a["queue"]} for a in AGENTS],
+        "guardrails": GUARDRAILS,
+        "llms": [{"name": l["name"], "provider": l["provider"], "cost": l["cost"]} for l in LLMS],
+        "prime_directives": [{"number": p["number"], "name": p["name"]} for p in PRIME_DIRECTIVES],
+    }
