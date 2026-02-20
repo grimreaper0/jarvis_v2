@@ -1,32 +1,53 @@
-"""LLMRouter v3 — Free-first, task-type-aware multi-backend routing (async).
+"""LLMRouter v4 — vLLM-first, task-type-aware multi-backend routing (async).
 
-Priority: Local Ollama ($0) → Free Cloud APIs (Groq/DeepSeek/OpenRouter) → Paid (Claude/Grok)
+BILLY (Billy Goat) — AI system by FiestyGoat AI LLC
+
+Priority: vLLM Local (Mac Studio) → vLLM Remote (g5.xlarge) → Free Cloud → Paid Dev-Only
+
+All backends use the OpenAI-compatible API (/v1/chat/completions).
+Ollama is NOT used. All models served via vLLM.
+
+--- What is HuggingFace vs LangGraph? ---
+LangGraph  = orchestration engine. Builds the graphs, manages state, routes tasks,
+             handles interrupt(). It's the workflow brain of BILLY.
+HuggingFace = model registry (like an app store for model weights). When vLLM starts,
+              it downloads model files from HuggingFace using model IDs like
+              "Qwen/Qwen3-4B". That's all it does here.
+vLLM       = inference server. Downloads model from HuggingFace, serves it via
+             OpenAI-compatible API. LangGraph calls vLLM to generate text.
+--- End explanation ---
 
 Backends
 --------
-- ollama      : Local models (qwen2.5:0.5b, deepseek-r1:7b, etc.) — always $0
-- groq         : Groq cloud (llama-3.3-70b, deepseek-r1 distills) — free tier
-                 Get key: https://console.groq.com (no credit card required)
-- deepseek     : DeepSeek API (deepseek-chat=V3.2, deepseek-reasoner=R1) — very cheap
+- vllm_local  : vLLM on Mac Studio M2 Max (localhost:8000) — primary, always-on, $0
+                Start: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000
+- vllm        : vLLM on AWS g5.xlarge — heavy workloads, on-demand ($0.73/hr)
+                Set URL: keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')
+- groq         : Groq cloud free tier (llama-3.3-70b, deepseek-r1 distills, fast)
+                 Get key: https://console.groq.com (no credit card)
+- deepseek     : DeepSeek API (V3.2 + R1 reasoner, $0.07/M tokens)
                  Get key: https://platform.deepseek.com
-- openrouter   : OpenRouter free pool (Qwen3-235B, Llama 3.1, Mistral) — free models
+- openrouter   : OpenRouter free pool (Qwen3.5, Llama 3.1, Mistral)
                  Get key: https://openrouter.ai
-- claude       : Anthropic Claude API — development use only
-- grok         : xAI Grok API — has key, use when needed
+- grok         : xAI Grok API (key configured, for validation)
+- claude       : Anthropic Claude — DEVELOPMENT USE ONLY
 
-Add API keys via Keychain:
-    python3 -c "import keyring; keyring.set_password('jarvis_v2', 'groq_api_key', 'gsk_...')"
-    python3 -c "import keyring; keyring.set_password('jarvis_v2', 'deepseek_api_key', 'sk-...')"
-    python3 -c "import keyring; keyring.set_password('jarvis_v2', 'openrouter_api_key', 'sk-or-...')"
+Models on Mac Studio (vLLM local, 32GB RAM):
+  Qwen/Qwen3-4B                             ~2.5GB  — fast general (NEW Qwen3 family)
+  Qwen/Qwen2.5-0.5B-Instruct               ~0.5GB  — ultra-fast simple tasks
+  deepseek-ai/DeepSeek-R1-Distill-Qwen-7B  ~4.7GB  — local reasoning
+  Qwen/Qwen2.5-Coder-1.5B-Instruct         ~1.0GB  — local coding
+  meta-llama/Llama-3.2-3B-Instruct         ~2.0GB  — general fallback
+  mistralai/Mistral-7B-Instruct-v0.3       ~4.1GB  — creative writing
 
-Task-type routing
------------------
-Pass task_type in LLMRequest to get the optimal model for the job:
+Models on g5.xlarge (vLLM remote, 24GB A10G VRAM):
+  Qwen/Qwen3-30B-A3B                       ~18GB   — current primary (MoE)
+  deepseek-ai/DeepSeek-R1-Distill-Qwen-14B ~8.5GB  — heavy reasoning
+  mistralai/Devstral-Small-2505            ~14GB   — coding specialist
+  Qwen/Qwen3-4B                            ~2.5GB  — fast routing model
 
-    await router.complete(LLMRequest(prompt="...", task_type="reasoning"))
-    await router.complete(LLMRequest(prompt="...", task_type="coding"))
-
-Valid task_types: simple, reasoning, coding, long_ctx, creative, trading, analysis, content
+Qwen3.5-397B-A17B — available via OpenRouter API (free tier) or DeepSeek-style API.
+  Full 397B model does NOT fit g5.xlarge (24GB VRAM). Use via cloud API.
 """
 
 import re
@@ -46,13 +67,13 @@ log = structlog.get_logger()
 # ---------------------------------------------------------------------------
 
 class LLMBackend(str, Enum):
-    OLLAMA = "ollama"
-    VLLM = "vllm"          # AWS g5.xlarge: Qwen3-30B, DeepSeek-R1-14B, Devstral-24B
-    GROQ = "groq"
-    DEEPSEEK = "deepseek"
-    OPENROUTER = "openrouter"
-    CLAUDE = "claude"
-    GROK = "grok"
+    VLLM_LOCAL = "vllm_local"    # Mac Studio M2 Max — primary inference
+    VLLM = "vllm"                # AWS g5.xlarge — heavy workloads
+    GROQ = "groq"                # Free cloud, 70B inference
+    DEEPSEEK = "deepseek"        # Cheap cloud, V3.2 + R1
+    OPENROUTER = "openrouter"    # Free pool: Qwen3.5, Llama 3.1, Mistral
+    GROK = "grok"                # xAI, configured
+    CLAUDE = "claude"            # Dev-only — never use in production bots
 
 
 class LLMRequest(BaseModel):
@@ -80,80 +101,78 @@ class LLMResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Task-type → (backend, model) routing table
 #
-# Each entry is an ordered list of (backend_name, model_name) tuples.
-# The router picks the first tuple whose backend is available.
+# Uses HuggingFace model IDs for vLLM backends.
+# All routes prefer free/local options. Cloud APIs used only when vLLM unavailable.
 # ---------------------------------------------------------------------------
 
 TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
-    # Fast, simple tasks — cheapest/fastest models first
-    # qwen3:4b local → vLLM Qwen3-4B (fast router) → Groq
+    # Fast, simple tasks — smallest/cheapest models first
     "simple": [
-        ("ollama", "qwen3:4b"),           # Qwen3 local (new, ~2.5GB) — pull to activate
-        ("ollama", "qwen2.5:0.5b"),       # existing fast local
-        ("ollama", "llama3.2:3b"),        # existing general local
-        ("vllm", "Qwen/Qwen3-4B"),        # GPU server fast router (port 8001)
-        ("groq", "llama-3.3-70b-versatile"),
+        ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),          # ultra-fast local
+        ("vllm_local", "Qwen/Qwen3-4B"),                        # fast local
+        ("vllm", "Qwen/Qwen3-4B"),                              # fast on GPU
+        ("groq", "llama-3.3-70b-versatile"),                    # free cloud fallback
         ("openrouter", "meta-llama/llama-3.1-8b-instruct:free"),
     ],
 
-    # Deep reasoning, chain-of-thought — DeepSeek R1 family + Qwen3-30B
+    # Deep reasoning — DeepSeek R1 family
     "reasoning": [
-        ("ollama", "deepseek-r1:7b"),          # existing local
-        ("vllm", "deepseek-r1-14b"),           # GPU server: DeepSeek-R1-14B (better)
-        ("vllm", "Qwen/Qwen3-30B-A3B"),        # GPU server: MoE primary
+        ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
+        ("vllm", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"),
+        ("vllm", "Qwen/Qwen3-30B-A3B"),
         ("groq", "deepseek-r1-distill-llama-70b"),
         ("deepseek", "deepseek-reasoner"),
         ("openrouter", "deepseek/deepseek-r1:free"),
     ],
 
-    # Code generation — Devstral-24B on GPU server, qwen-coder locally
+    # Code generation
     "coding": [
-        ("ollama", "qwen2.5-coder:1.5b"),          # existing local
-        ("vllm", "mistralai/Devstral-Small-2505"),  # GPU server: Devstral-24B coding
+        ("vllm_local", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
+        ("vllm", "mistralai/Devstral-Small-2505"),              # Devstral-24B
         ("groq", "llama-3.3-70b-versatile"),
         ("openrouter", "qwen/qwen-2.5-coder-32b-instruct:free"),
         ("deepseek", "deepseek-chat"),
     ],
 
-    # Long documents, big context — Qwen3-30B excels here (128K ctx)
+    # Long context — Qwen3.5 (256K) via OpenRouter API, then GPU 128K
     "long_ctx": [
-        ("vllm", "Qwen/Qwen3-30B-A3B"),           # GPU server: 128K context window
-        ("ollama", "qwen2.5:14b"),                 # local large (install if needed)
-        ("groq", "llama-3.1-70b-versatile"),       # Groq has large context
-        ("openrouter", "qwen/qwen3-235b-a22b:free"),
+        ("openrouter", "qwen/qwen3.5-397b-a17b:free"),         # Qwen3.5 API (256K)
+        ("vllm", "Qwen/Qwen3-30B-A3B"),                        # GPU 128K
+        ("vllm_local", "Qwen/Qwen3-4B"),                       # local 32K fallback
+        ("groq", "llama-3.1-70b-versatile"),
     ],
 
     # Creative writing, captions, marketing copy
     "creative": [
-        ("ollama", "mistral:7b"),                  # local writing model
-        ("vllm", "Qwen/Qwen3-30B-A3B"),            # GPU: best quality for creative
+        ("vllm_local", "mistralai/Mistral-7B-Instruct-v0.3"),
+        ("vllm", "Qwen/Qwen3-30B-A3B"),
         ("groq", "mixtral-8x7b-32768"),
         ("openrouter", "mistralai/mistral-7b-instruct:free"),
         ("grok", "grok-4-fast-reasoning"),
     ],
 
-    # Trading signals, market analysis — reasoning required
+    # Trading signals — reasoning essential
     "trading": [
-        ("ollama", "deepseek-r1:7b"),
-        ("vllm", "deepseek-r1-14b"),               # GPU server: better reasoning
+        ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
+        ("vllm", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"),
         ("groq", "deepseek-r1-distill-llama-70b"),
         ("deepseek", "deepseek-reasoner"),
         ("groq", "llama-3.3-70b-versatile"),
     ],
 
-    # General analysis, scoring, evaluation — Qwen3-30B as top quality option
+    # General analysis, scoring — GPU primary for quality
     "analysis": [
-        ("ollama", "deepseek-r1:7b"),
-        ("vllm", "Qwen/Qwen3-30B-A3B"),            # GPU server: primary model
+        ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
+        ("vllm", "Qwen/Qwen3-30B-A3B"),
         ("groq", "llama-3.3-70b-versatile"),
         ("deepseek", "deepseek-chat"),
+        ("openrouter", "qwen/qwen3.5-397b-a17b:free"),
     ],
 
-    # Content quality, Instagram/YouTube/TikTok copy — fast is fine
+    # Content quality, Instagram/YouTube/TikTok copy
     "content": [
-        ("ollama", "qwen3:4b"),           # Qwen3 local if installed
-        ("ollama", "qwen2.5:0.5b"),
-        ("ollama", "llama3.2:3b"),
+        ("vllm_local", "Qwen/Qwen3-4B"),
+        ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),
         ("groq", "llama-3.3-70b-versatile"),
         ("openrouter", "meta-llama/llama-3.1-8b-instruct:free"),
     ],
@@ -170,35 +189,31 @@ _DEFAULT_ROUTING = TASK_ROUTING["simple"]
 class LLMRouter:
     """Routes LLM calls to the best available backend for the given task type.
 
-    Priority: Ollama (local, $0) → Groq (free) → DeepSeek → OpenRouter → Grok → Claude
-    Claude is reserved for development use only.
+    Priority: vLLM Local (Mac) → vLLM Remote (g5) → Groq → DeepSeek
+              → OpenRouter → Grok → Claude (dev-only)
 
     Usage::
 
         router = LLMRouter()
 
         # Simple routing by task type
-        resp = await router.complete(LLMRequest(
-            prompt="Summarize this...",
-            task_type="simple",
-        ))
-
-        # Force reasoning model
-        resp = await router.complete(LLMRequest(
-            prompt="Analyze this trading opportunity...",
-            task_type="reasoning",
-        ))
-        print(resp.reasoning)   # chain-of-thought (DeepSeek R1)
-        print(resp.conclusion)  # final answer
-
-        # Convenience wrappers
         text = await router.generate("Summarize this...", task_type="simple")
-        result = await router.reason("Evaluate this trade...", context={...})
+
+        # Force reasoning path (routes to DeepSeek R1)
+        result = await router.reason("Analyze this trade...", context={...})
+
+        # Explicit backend override
+        resp = await router.complete(LLMRequest(
+            prompt="...",
+            backend=LLMBackend.VLLM_LOCAL,
+            task_type="coding",
+        ))
     """
 
-    # Legacy model constants (kept for backward compat)
-    REASONING_MODEL = "deepseek-r1:7b"
-    STANDARD_MODEL = "qwen2.5:0.5b"
+    # Model constants for common use cases
+    REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+    STANDARD_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+    FAST_MODEL = "Qwen/Qwen3-4B"
 
     def __init__(self, settings=None, memory=None):
         from config.settings import get_settings
@@ -217,29 +232,29 @@ class LLMRouter:
         if self._backends is not None and now - self._backends_checked_at < 300:
             return self._backends
 
-        # Structure: {backend_name: True/False or set of model names for ollama}
         backends: dict[str, Any] = {
-            "ollama": set(),   # set of available model names
-            "vllm": set(),     # set of available model IDs on GPU server
+            "vllm_local": set(),   # HuggingFace model IDs served locally
+            "vllm": set(),         # HuggingFace model IDs on g5.xlarge
             "groq": False,
             "deepseek": False,
             "openrouter": False,
-            "claude": False,
             "grok": False,
+            "claude": False,
         }
 
-        # Ollama — probe tags endpoint
+        # vLLM local — probe localhost:8000/v1/models
         try:
             async with httpx.AsyncClient(timeout=2) as client:
-                resp = await client.get(f"{self.settings.ollama_base_url}/api/tags")
+                resp = await client.get(f"{self.settings.vllm_local_base_url}/models")
                 if resp.status_code == 200:
-                    backends["ollama"] = {
-                        m.get("name", "") for m in resp.json().get("models", [])
+                    backends["vllm_local"] = {
+                        m.get("id", "") for m in resp.json().get("data", [])
                     }
+                    log.info("router.vllm_local_up", models=len(backends["vllm_local"]))
         except Exception as exc:
-            log.warning("router.ollama_probe_failed", error=str(exc))
+            log.debug("router.vllm_local_down", error=str(exc))
 
-        # vLLM GPU server — probe /v1/models endpoint
+        # vLLM remote — g5.xlarge URL from Keychain
         vllm_url = self._get_keychain_key("vllm_base_url") or self.settings.vllm_base_url
         if vllm_url:
             try:
@@ -249,28 +264,28 @@ class LLMRouter:
                         backends["vllm"] = {
                             m.get("id", "") for m in resp.json().get("data", [])
                         }
-                        log.info("router.vllm_available", models=len(backends["vllm"]), url=vllm_url)
+                        log.info("router.vllm_remote_up", models=len(backends["vllm"]), url=vllm_url)
             except Exception as exc:
-                log.debug("router.vllm_unavailable", error=str(exc))
+                log.debug("router.vllm_remote_down", error=str(exc))
 
-        # Cloud APIs — key presence check only (lazy, no network call)
+        # Cloud APIs — key presence check only
         for backend, key_name in [
             ("groq", "groq_api_key"),
             ("deepseek", "deepseek_api_key"),
             ("openrouter", "openrouter_api_key"),
-            ("claude", "anthropic_api_key"),
             ("grok", "xai_api_key"),
+            ("claude", "anthropic_api_key"),
         ]:
             val = self._get_keychain_key(key_name)
             backends[backend] = bool(val)
 
         log.info(
             "router.backends_detected",
-            ollama_models=len(backends["ollama"]),
+            vllm_local=len(backends["vllm_local"]),
+            vllm_remote=len(backends["vllm"]),
             groq=backends["groq"],
             deepseek=backends["deepseek"],
             openrouter=backends["openrouter"],
-            claude=backends["claude"],
             grok=backends["grok"],
         )
         self._backends = backends
@@ -279,14 +294,11 @@ class LLMRouter:
 
     def _is_available(self, backend_name: str, model: str, backends: dict[str, Any]) -> bool:
         """Check if a specific (backend, model) pair is usable."""
-        if backend_name == "ollama":
-            available = backends.get("ollama", set())
-            # Match exact name or prefix (e.g. "deepseek-r1:7b" matches "deepseek-r1:7b")
-            return any(model in m or m.startswith(model.split(":")[0]) for m in available)
-        if backend_name == "vllm":
-            available = backends.get("vllm", set())
-            # vLLM model IDs are full HF names e.g. "Qwen/Qwen3-30B-A3B"
-            return bool(available) and any(
+        if backend_name in ("vllm_local", "vllm"):
+            available = backends.get(backend_name, set())
+            if not available:
+                return False
+            return any(
                 model.lower() in m.lower() or m.lower() in model.lower()
                 for m in available
             )
@@ -301,48 +313,38 @@ class LLMRouter:
     ) -> tuple[str, str]:
         """Pick the best available (backend_name, model_name) for this request."""
 
-        # Explicit backend override — use it with task-appropriate model
         if backend_override is not None:
             bname = backend_override.value
-            if backend_override == LLMBackend.OLLAMA:
-                model = self.REASONING_MODEL if reasoning else self.STANDARD_MODEL
-            elif backend_override == LLMBackend.VLLM:
-                model = "deepseek-r1-14b" if reasoning else "Qwen/Qwen3-30B-A3B"
-            elif backend_override == LLMBackend.GROQ:
-                model = "deepseek-r1-distill-llama-70b" if reasoning else "llama-3.3-70b-versatile"
-            elif backend_override == LLMBackend.DEEPSEEK:
-                model = "deepseek-reasoner" if reasoning else "deepseek-chat"
-            elif backend_override == LLMBackend.CLAUDE:
-                model = "claude-sonnet-4-6"
-            elif backend_override == LLMBackend.GROK:
-                model = "grok-4-fast-reasoning"
-            else:
-                model = self.STANDARD_MODEL
-            return bname, model
+            override_models = {
+                "vllm_local": (self.REASONING_MODEL if reasoning else self.FAST_MODEL),
+                "vllm": ("deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+                         if reasoning else "Qwen/Qwen3-30B-A3B"),
+                "groq": ("deepseek-r1-distill-llama-70b"
+                         if reasoning else "llama-3.3-70b-versatile"),
+                "deepseek": ("deepseek-reasoner" if reasoning else "deepseek-chat"),
+                "grok": "grok-4-fast-reasoning",
+                "claude": "claude-sonnet-4-6",
+            }
+            return bname, override_models.get(bname, self.STANDARD_MODEL)
 
-        # Reasoning flag shortcut → force reasoning task type
         effective_task = "reasoning" if reasoning else task_type
         routing = TASK_ROUTING.get(effective_task, _DEFAULT_ROUTING)
 
         for backend_name, model in routing:
             if self._is_available(backend_name, model, backends):
-                log.debug(
-                    "router.route_selected",
-                    task_type=effective_task,
-                    backend=backend_name,
-                    model=model,
-                )
+                log.debug("router.route_selected", task_type=effective_task,
+                          backend=backend_name, model=model)
                 return backend_name, model
 
-        # Last-resort fallback — anything available
-        if backends.get("ollama"):
-            first_model = next(iter(backends["ollama"]))
-            return "ollama", first_model
+        # Last resort — any vLLM local model
+        vllm_local_available = backends.get("vllm_local", set())
+        if vllm_local_available:
+            first = next(iter(vllm_local_available))
+            return "vllm_local", first
 
         raise RuntimeError(
             f"No LLM backend available for task_type={task_type!r}. "
-            "Ensure Ollama is running (ollama serve) or add free API keys to Keychain. "
-            "See router.py docstring for setup instructions."
+            "Start vLLM: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000"
         )
 
     # ------------------------------------------------------------------
@@ -350,7 +352,7 @@ class LLMRouter:
     # ------------------------------------------------------------------
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        """Route the request to the best available backend and return a response."""
+        """Route the request to the best available backend."""
         backends = await self._detect_backends()
         backend_name, model = self._select_route(
             task_type=request.task_type,
@@ -358,28 +360,27 @@ class LLMRouter:
             backend_override=request.backend,
             backends=backends,
         )
-        # Use caller-specified model if provided
         model = request.model or model
 
-        log.info(
-            "router.dispatch",
-            backend=backend_name,
-            model=model,
-            task_type=request.task_type,
-            reasoning=request.reasoning,
-            prompt_len=len(request.prompt),
-        )
+        log.info("router.dispatch", backend=backend_name, model=model,
+                 task_type=request.task_type, reasoning=request.reasoning,
+                 prompt_len=len(request.prompt))
 
         t0 = time.monotonic()
 
-        if backend_name == "ollama":
-            resp = await self._ollama_complete(request, model)
+        if backend_name == "vllm_local":
+            resp = await self._openai_compat_complete(
+                request, model,
+                base_url=self.settings.vllm_local_base_url,
+                api_key="",
+                backend_enum=LLMBackend.VLLM_LOCAL,
+            )
         elif backend_name == "vllm":
             vllm_url = self._get_keychain_key("vllm_base_url") or self.settings.vllm_base_url
             resp = await self._openai_compat_complete(
                 request, model,
                 base_url=vllm_url,
-                api_key="",  # vLLM typically unauthenticated on private network
+                api_key="",
                 backend_enum=LLMBackend.VLLM,
             )
         elif backend_name == "groq":
@@ -404,20 +405,19 @@ class LLMRouter:
                 backend_enum=LLMBackend.OPENROUTER,
                 extra_headers={
                     "HTTP-Referer": "https://github.com/grimreaper0/jarvis_v2",
-                    "X-Title": "jarvis_v2",
+                    "X-Title": "BILLY — FiestyGoat AI",
                 },
             )
-        elif backend_name == "claude":
-            resp = await self._claude_complete(request)
         elif backend_name == "grok":
             resp = await self._grok_complete(request, model)
+        elif backend_name == "claude":
+            resp = await self._claude_complete(request)
         else:
             raise RuntimeError(f"Unknown backend: {backend_name}")
 
         resp.latency_ms = round((time.monotonic() - t0) * 1000, 1)
 
-        # Parse DeepSeek R1 <think> tags regardless of backend
-        if request.reasoning or "deepseek-r1" in model or "reasoner" in model:
+        if request.reasoning or "deepseek-r1" in model.lower() or "reasoner" in model.lower():
             resp = _parse_reasoning(resp)
 
         await self._log_usage(resp, request.task_type)
@@ -432,10 +432,7 @@ class LLMRouter:
         temperature: float = 0.7,
     ) -> str:
         resp = await self.complete(LLMRequest(
-            prompt=prompt,
-            task_type=task_type,
-            max_tokens=max_tokens,
-            temperature=temperature,
+            prompt=prompt, task_type=task_type, max_tokens=max_tokens, temperature=temperature,
         ))
         return resp.content
 
@@ -453,11 +450,8 @@ class LLMRouter:
             full_prompt = f"{prompt}\n\nContext:\n{ctx_lines}"
 
         resp = await self.complete(LLMRequest(
-            prompt=full_prompt,
-            task_type="reasoning",
-            reasoning=True,
-            max_tokens=max_tokens,
-            temperature=temperature,
+            prompt=full_prompt, task_type="reasoning", reasoning=True,
+            max_tokens=max_tokens, temperature=temperature,
         ))
         return {
             "reasoning": resp.reasoning,
@@ -473,33 +467,6 @@ class LLMRouter:
     # Backend implementations
     # ------------------------------------------------------------------
 
-    async def _ollama_complete(self, request: LLMRequest, model: str) -> LLMResponse:
-        payload = {
-            "model": model,
-            "prompt": request.prompt,
-            "system": request.system,
-            "stream": False,
-            "options": {
-                "num_ctx": 4096,
-                "num_predict": request.max_tokens,
-                "temperature": request.temperature,
-                "keep_alive": -1,
-            },
-        }
-        async with httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(
-                f"{self.settings.ollama_base_url}/api/generate", json=payload
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        return LLMResponse(
-            content=data["response"],
-            backend=LLMBackend.OLLAMA,
-            model=model,
-            tokens_used=data.get("eval_count", 0),
-        )
-
     async def _openai_compat_complete(
         self,
         request: LLMRequest,
@@ -509,7 +476,7 @@ class LLMRouter:
         backend_enum: LLMBackend,
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
-        """Generic handler for OpenAI-compatible APIs (Groq, DeepSeek, OpenRouter)."""
+        """Shared handler for all OpenAI-compatible APIs: vLLM, Groq, DeepSeek, OpenRouter."""
         messages = []
         if request.system:
             messages.append({"role": "system", "content": request.system})
@@ -521,19 +488,14 @@ class LLMRouter:
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
         }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         if extra_headers:
             headers.update(extra_headers)
 
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
+            resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
 
@@ -541,15 +503,21 @@ class LLMRouter:
         tokens = data.get("usage", {}).get("total_tokens", 0)
         log.info(f"{backend_enum.value}.response", tokens=tokens, model=model)
 
-        return LLMResponse(
-            content=content,
-            backend=backend_enum,
-            model=model,
-            tokens_used=tokens,
+        return LLMResponse(content=content, backend=backend_enum, model=model, tokens_used=tokens)
+
+    async def _grok_complete(self, request: LLMRequest, model: str) -> LLMResponse:
+        api_key = self._get_keychain_key("xai_api_key")
+        if not api_key:
+            raise RuntimeError("xai_api_key not found in Keychain")
+        return await self._openai_compat_complete(
+            request, model or "grok-4-fast-reasoning",
+            base_url="https://api.x.ai/v1",
+            api_key=api_key,
+            backend_enum=LLMBackend.GROK,
         )
 
     async def _claude_complete(self, request: LLMRequest) -> LLMResponse:
-        """Anthropic Claude API — development use only."""
+        """Anthropic Claude — DEVELOPMENT USE ONLY. Never call from production bots."""
         try:
             import anthropic
         except ImportError:
@@ -559,50 +527,25 @@ class LLMRouter:
         if not api_key:
             raise RuntimeError(
                 "anthropic_api_key not found in Keychain. "
-                "Claude is for development only — add a free cloud API key instead."
+                "Claude is for development only — use vLLM or free cloud APIs in BILLY."
             )
 
         client = anthropic.AsyncAnthropic(api_key=api_key)
         model = request.model or "claude-sonnet-4-6"
-
         messages = [{"role": "user", "content": request.prompt}]
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "max_tokens": request.max_tokens,
-            "messages": messages,
-        }
+        kwargs: dict[str, Any] = {"model": model, "max_tokens": request.max_tokens, "messages": messages}
         if request.system:
             kwargs["system"] = request.system
 
         resp = await client.messages.create(**kwargs)
         content = resp.content[0].text
         tokens = (resp.usage.input_tokens or 0) + (resp.usage.output_tokens or 0)
-
         log.info("claude.response", input_tokens=resp.usage.input_tokens,
                  output_tokens=resp.usage.output_tokens)
-        return LLMResponse(
-            content=content,
-            backend=LLMBackend.CLAUDE,
-            model=model,
-            tokens_used=tokens,
-        )
-
-    async def _grok_complete(self, request: LLMRequest, model: str) -> LLMResponse:
-        """xAI Grok via OpenAI-compatible REST endpoint."""
-        api_key = self._get_keychain_key("xai_api_key")
-        if not api_key:
-            raise RuntimeError("xai_api_key not found in Keychain")
-
-        model = request.model or model or "grok-4-fast-reasoning"
-        return await self._openai_compat_complete(
-            request, model,
-            base_url="https://api.x.ai/v1",
-            api_key=api_key,
-            backend_enum=LLMBackend.GROK,
-        )
+        return LLMResponse(content=content, backend=LLMBackend.CLAUDE, model=model, tokens_used=tokens)
 
     # ------------------------------------------------------------------
-    # LangChain integration
+    # LangChain integration (for LangGraph nodes that use as_llm pattern)
     # ------------------------------------------------------------------
 
     def as_langchain_llm(
@@ -611,31 +554,22 @@ class LLMRouter:
         reasoning: bool = False,
         task_type: str = "simple",
     ):
-        """Return a LangChain-compatible LLM for use in LangGraph nodes.
-
-        Prefers Ollama (local). Falls back to ChatOpenAI-compat for cloud backends
-        when langchain-openai is installed.
+        """Return a LangChain-compatible LLM backed by vLLM local (OpenAI-compat).
 
         For async LangGraph nodes, use ``await router.complete(...)`` directly.
+        This helper is for nodes that require a synchronous LangChain BaseLLM.
         """
         try:
-            from langchain_ollama import OllamaLLM
-            if reasoning or task_type == "reasoning":
-                selected = model or self.REASONING_MODEL
-            elif task_type == "coding":
-                selected = model or self.settings.ollama_model_coding
-            elif task_type == "creative":
-                selected = model or self.settings.ollama_model_writing
-            else:
-                selected = model or self.STANDARD_MODEL
-
-            return OllamaLLM(
-                base_url=self.settings.ollama_base_url,
+            from langchain_openai import ChatOpenAI
+            selected = model or (self.REASONING_MODEL if reasoning else self.FAST_MODEL)
+            return ChatOpenAI(
+                base_url=self.settings.vllm_local_base_url,
+                api_key="none",  # vLLM local: no auth required
                 model=selected,
             )
         except ImportError:
             raise RuntimeError(
-                "langchain-ollama not installed. Run: pip install langchain-ollama"
+                "Install langchain-openai for vLLM integration: pip install langchain-openai"
             )
 
     # ------------------------------------------------------------------
@@ -645,7 +579,6 @@ class LLMRouter:
     def _get_keychain_key(self, key_name: str) -> str | None:
         try:
             import keyring
-            # Try both service names for compatibility with jarvis_v1
             for service in ("jarvis_v2", "personal_agent_hub"):
                 val = keyring.get_password(service, key_name)
                 if val:
@@ -655,14 +588,8 @@ class LLMRouter:
             return None
 
     async def _log_usage(self, resp: LLMResponse, task_type: str) -> None:
-        log.info(
-            "router.usage",
-            backend=resp.backend,
-            model=resp.model,
-            tokens=resp.tokens_used,
-            latency_ms=resp.latency_ms,
-            task_type=task_type,
-        )
+        log.info("router.usage", backend=resp.backend, model=resp.model,
+                 tokens=resp.tokens_used, latency_ms=resp.latency_ms, task_type=task_type)
 
 
 # ---------------------------------------------------------------------------

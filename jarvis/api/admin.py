@@ -338,138 +338,139 @@ GUARDRAILS = [
 ]
 
 LLMS = [
-    # ── Tier 1: Local Ollama (Mac Studio M2 Max, always-on, $0) ─────────────────
+    # ── Tier 1: vLLM Local — Mac Studio M2 Max (always-on, $0) ─────────────
     {
-        "name": "qwen2.5:0.5b",
-        "provider": "Ollama — Local Mac Studio",
-        "cost": "$0.00",
-        "size": "397MB",
-        "speed": "~3.3s",
-        "best_for": "Caption generation, content drafts, fast iteration, simple tasks",
-        "not_for": "Complex reasoning, code generation",
-        "task_types": "simple, content",
-        "config": "ollama_model_fast — installed ✅",
-        "priority": 1,
-    },
-    {
-        "name": "qwen3:4b",
-        "provider": "Ollama — Local Mac Studio",
+        "name": "Qwen/Qwen3-4B",
+        "provider": "vLLM Local — Mac Studio M2 Max",
         "cost": "$0.00",
         "size": "~2.5GB",
         "speed": "~5-8s",
-        "best_for": "General tasks, fast routing, improved quality over qwen2.5:0.5b",
+        "best_for": "Fast general tasks, content drafts, simple routing decisions",
         "not_for": "Heavy reasoning",
         "task_types": "simple, content",
-        "config": "Pull: ollama pull qwen3:4b — new Qwen3 family",
+        "config": "vllm serve Qwen/Qwen3-4B --device mps --port 8000",
+        "priority": 1,
+    },
+    {
+        "name": "Qwen/Qwen2.5-0.5B-Instruct",
+        "provider": "vLLM Local — Mac Studio M2 Max",
+        "cost": "$0.00",
+        "size": "~0.5GB",
+        "speed": "~2-3s",
+        "best_for": "Ultra-fast simple tasks, high-frequency calls",
+        "not_for": "Quality-sensitive tasks",
+        "task_types": "simple (ultra-fast path)",
+        "config": "vllm serve Qwen/Qwen2.5-0.5B-Instruct --device mps --port 8000",
         "priority": 2,
     },
     {
-        "name": "deepseek-r1:7b",
-        "provider": "Ollama — Local Mac Studio",
+        "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "provider": "vLLM Local — Mac Studio M2 Max",
         "cost": "$0.00",
         "size": "~4.7GB",
         "speed": "~20-40s",
         "best_for": "Trading analysis, chain-of-thought reasoning, complex decisions",
         "not_for": "Real-time responses, simple tasks",
         "task_types": "reasoning, trading",
-        "config": "ollama_model_reason — installed ✅ — LLMRequest(reasoning=True)",
+        "config": "vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --device mps --port 8000 — LLMRequest(reasoning=True)",
         "priority": 3,
     },
     {
-        "name": "qwen2.5-coder:1.5b",
-        "provider": "Ollama — Local Mac Studio",
+        "name": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "provider": "vLLM Local — Mac Studio M2 Max",
         "cost": "$0.00",
-        "size": "986MB",
+        "size": "~1.0GB",
         "speed": "~5s",
         "best_for": "Code generation, debugging, implementation specs",
         "not_for": "Creative writing, reasoning",
         "task_types": "coding",
-        "config": "ollama_model_coding — installed ✅",
+        "config": "vllm serve Qwen/Qwen2.5-Coder-1.5B-Instruct --device mps --port 8000",
         "priority": 4,
     },
     {
-        "name": "llama3.2:3b",
-        "provider": "Ollama — Local Mac Studio",
-        "cost": "$0.00",
-        "size": "~2.0GB",
-        "speed": "~8s",
-        "best_for": "General conversations, summarization",
-        "not_for": "Heavy reasoning, long documents",
-        "task_types": "simple fallback",
-        "config": "ollama_model_general — installed ✅",
-        "priority": 5,
-    },
-    {
-        "name": "mistral:7b",
-        "provider": "Ollama — Local Mac Studio",
+        "name": "mistralai/Mistral-7B-Instruct-v0.3",
+        "provider": "vLLM Local — Mac Studio M2 Max",
         "cost": "$0.00",
         "size": "~4.1GB",
         "speed": "~15s",
-        "best_for": "Creative writing, marketing copy, Instagram/TikTok captions",
+        "best_for": "Creative writing, marketing copy, social media captions",
         "not_for": "Technical reasoning",
         "task_types": "creative",
-        "config": "ollama_model_writing — pull: ollama pull mistral:7b",
+        "config": "vllm serve mistralai/Mistral-7B-Instruct-v0.3 --device mps --port 8000",
+        "priority": 5,
+    },
+    {
+        "name": "meta-llama/Llama-3.2-3B-Instruct",
+        "provider": "vLLM Local — Mac Studio M2 Max",
+        "cost": "$0.00",
+        "size": "~2.0GB",
+        "speed": "~8s",
+        "best_for": "General tasks fallback, summarization",
+        "not_for": "Reasoning, long documents",
+        "task_types": "simple fallback",
+        "config": "vllm serve meta-llama/Llama-3.2-3B-Instruct --device mps --port 8000",
         "priority": 6,
     },
-    # ── Tier 2: vLLM GPU Server (AWS g5.xlarge, $0.73/hr — start when needed) ──
+    # ── Tier 2: vLLM Remote — AWS g5.xlarge / New Rig (on-demand) ───────────
     {
         "name": "Qwen/Qwen3-30B-A3B (MoE)",
-        "provider": "vLLM — AWS g5.xlarge",
-        "cost": "$0.73/hr (on-demand) — stop when not in use",
+        "provider": "vLLM Remote — GPU Server",
+        "cost": "$0.73/hr on g5.xlarge — stop when idle | $0 on new rig in 2 weeks",
         "size": "18GB VRAM (3B active params via MoE)",
         "speed": "~25 tok/s",
-        "best_for": "Primary model — analysis, long-context (128K), general reasoning, content quality",
-        "not_for": "Always-on workloads (instance cost)",
-        "task_types": "analysis, long_ctx, creative",
+        "best_for": "Primary heavy model — analysis, long-context 128K, general quality reasoning",
+        "not_for": "Always-on (instance cost until new rig)",
+        "task_types": "analysis, reasoning, creative",
         "config": "keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')",
         "priority": 7,
     },
     {
-        "name": "Qwen/Qwen3-4B (fast router)",
-        "provider": "vLLM — AWS g5.xlarge",
-        "cost": "$0.73/hr shared",
-        "size": "~3GB VRAM",
-        "speed": "Fast routing queries",
-        "best_for": "Fast task routing decisions, lightweight inference on GPU",
-        "not_for": "Always-on (instance cost)",
-        "task_types": "simple (GPU fallback)",
-        "config": "vllm_base_url:8001 — served alongside Qwen3-30B",
+        "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "provider": "vLLM Remote — GPU Server",
+        "cost": "$0.73/hr shared | $0 on new rig",
+        "size": "~8.5GB VRAM",
+        "speed": "Better reasoning than local 7B",
+        "best_for": "Heavy trading analysis, deep reasoning when local R1-7B isn\'t enough",
+        "not_for": "Always-on before new rig",
+        "task_types": "reasoning, trading (GPU tier)",
+        "config": "vllm_base_url in Keychain — auto-selected when GPU online",
         "priority": 8,
     },
     {
-        "name": "deepseek-r1-14b",
-        "provider": "vLLM — AWS g5.xlarge",
-        "cost": "$0.73/hr shared",
-        "size": "~8.5GB VRAM",
-        "speed": "Better reasoning than 7b local",
-        "best_for": "Heavy reasoning, trading analysis, better than local R1-7B",
-        "not_for": "Simple tasks, always-on",
-        "task_types": "reasoning, trading",
-        "config": "vllm_base_url — auto-selected for reasoning tasks when vLLM online",
-        "priority": 9,
-    },
-    {
-        "name": "Devstral-24B (coding)",
-        "provider": "vLLM — AWS g5.xlarge",
-        "cost": "$0.73/hr shared",
+        "name": "mistralai/Devstral-Small-2505 (Devstral-24B)",
+        "provider": "vLLM Remote — GPU Server",
+        "cost": "$0.73/hr shared | $0 on new rig",
         "size": "~14GB VRAM",
         "speed": "~15 tok/s",
-        "best_for": "Complex code generation, architecture specs, implementation plans",
-        "not_for": "Simple code, always-on",
-        "task_types": "coding",
-        "config": "vllm_base_url — auto-selected for coding tasks when vLLM online",
+        "best_for": "Complex code generation, architecture specs, agentic coding tasks",
+        "not_for": "Always-on before new rig",
+        "task_types": "coding (GPU tier)",
+        "config": "vllm_base_url in Keychain — auto-selected for coding when GPU online",
+        "priority": 9,
+    },
+    # ── NEW RIG (2 weeks): Intel Core Ultra 9 285K + 2x RTX 5060 Ti 16GB ────
+    {
+        "name": "Qwen3.5-397B-A17B (future — new rig)",
+        "provider": "vLLM Local — New Rig (Intel Core Ultra 9 + 2x RTX 5060 Ti, 32GB VRAM)",
+        "cost": "$0.00 — local inference",
+        "size": "17B active (397B MoE, FP8), ~8-10GB active VRAM",
+        "speed": "8.6x faster than Qwen3-30B, 25+ tok/s estimated",
+        "best_for": "All heavy tasks — analysis, coding, reasoning, long-context 256K",
+        "not_for": "N/A — will be the primary model on new rig",
+        "task_types": "ALL task types — primary model on new rig",
+        "config": "Available in 2 weeks. Tensor parallel across 2x RTX 5060 Ti.",
         "priority": 10,
     },
-    # ── Tier 3: Free Cloud APIs (rate-limited, no cost, API key required) ───────
+    # ── Tier 3: Free Cloud APIs ──────────────────────────────────────────────
     {
         "name": "Groq: llama-3.3-70b-versatile",
         "provider": "Groq Cloud (free tier)",
         "cost": "$0.00 (rate-limited)",
         "size": "70B cloud",
-        "speed": "~1-3s (fast inference)",
-        "best_for": "70B quality when vLLM is offline, general analysis, content",
+        "speed": "~1-3s (fastest cloud inference)",
+        "best_for": "70B quality when GPU offline, content, analysis fallback",
         "not_for": "High-frequency calls (rate limits)",
-        "task_types": "analysis, coding, content fallback",
+        "task_types": "simple, analysis, content fallback",
         "config": "keyring.set_password('jarvis_v2', 'groq_api_key', 'gsk_...') — console.groq.com",
         "priority": 11,
     },
@@ -479,59 +480,59 @@ LLMS = [
         "cost": "$0.00 (rate-limited)",
         "size": "70B cloud",
         "speed": "~2-5s",
-        "best_for": "Reasoning fallback when local/vLLM offline",
-        "not_for": "High-frequency reasoning (rate limits)",
-        "task_types": "reasoning fallback",
-        "config": "groq_api_key in Keychain — auto-selected for reasoning",
+        "best_for": "Reasoning fallback when local/GPU offline",
+        "not_for": "High-frequency reasoning",
+        "task_types": "reasoning, trading fallback",
+        "config": "groq_api_key in Keychain — auto-selected",
         "priority": 12,
     },
     {
-        "name": "DeepSeek: deepseek-reasoner (R1)",
+        "name": "DeepSeek: deepseek-reasoner (R1 full)",
         "provider": "DeepSeek API",
-        "cost": "$0.55/M input, $2.19/M output (very cheap)",
+        "cost": "$0.55/M input, $2.19/M output",
         "size": "Full R1 cloud",
         "speed": "~5-15s",
-        "best_for": "Highest-quality reasoning when local fails",
-        "not_for": "High-frequency (cost adds up)",
+        "best_for": "Highest-quality reasoning when all local options fail",
+        "not_for": "High-frequency calls",
         "task_types": "reasoning final fallback",
-        "config": "keyring.set_password('jarvis_v2', 'deepseek_api_key', 'sk-...') — platform.deepseek.com",
+        "config": "keyring.set_password('jarvis_v2', 'deepseek_api_key', 'sk-...')",
         "priority": 13,
     },
     {
-        "name": "OpenRouter: Qwen3-235B-A22B (free)",
+        "name": "OpenRouter: Qwen3.5-397B-A17B (free API)",
         "provider": "OpenRouter (free pool)",
         "cost": "$0.00 (free model tier)",
-        "size": "235B MoE, 22B active",
-        "speed": "Variable (shared)",
-        "best_for": "Long-context tasks requiring massive model quality",
+        "size": "397B MoE cloud, 17B active",
+        "speed": "Variable (shared free tier)",
+        "best_for": "Long-context tasks 256K, highest quality before new rig arrives",
         "not_for": "Latency-sensitive tasks",
-        "task_types": "long_ctx fallback",
-        "config": "keyring.set_password('jarvis_v2', 'openrouter_api_key', 'sk-or-...') — openrouter.ai",
+        "task_types": "long_ctx, analysis (cloud fallback)",
+        "config": "keyring.set_password('jarvis_v2', 'openrouter_api_key', 'sk-or-...')",
         "priority": 14,
     },
-    # ── Tier 4: Paid APIs (development use only) ─────────────────────────────────
+    # ── Tier 4: Dev-Only Paid ────────────────────────────────────────────────
     {
         "name": "claude-sonnet-4-6",
         "provider": "Anthropic API — DEV ONLY",
         "cost": "$3/M input, $15/M output",
         "size": "Cloud",
         "speed": "<5s",
-        "best_for": "Development, architecture decisions, code review — NOT for production bots",
-        "not_for": "Production use (cost), routine inference",
+        "best_for": "Development, architecture decisions — NEVER call from production BILLY bots",
+        "not_for": "Production use — use vLLM or free cloud instead",
         "task_types": "dev only — LLMRequest(backend=LLMBackend.CLAUDE)",
         "config": "anthropic_api_key in Keychain",
         "priority": 15,
     },
     {
         "name": "grok-4-fast-reasoning",
-        "provider": "xAI API",
+        "provider": "xAI API — configured",
         "cost": "Per-token (see xAI pricing)",
         "size": "Cloud",
         "speed": "<10s",
-        "best_for": "Validation, second opinion on research, real-time web awareness",
+        "best_for": "Validation, research second-opinion, real-time web awareness",
         "not_for": "High-frequency calls",
-        "task_types": "creative, validation — LLMRequest(backend=LLMBackend.GROK)",
-        "config": "xai_api_key in Keychain — configured ✅",
+        "task_types": "creative validation — LLMRequest(backend=LLMBackend.GROK)",
+        "config": "xai_api_key in Keychain — configured \u2705",
         "priority": 16,
     },
 ]
@@ -909,9 +910,9 @@ def get_admin_html(settings=None) -> str:
           <tbody>
             <tr><td>confidence_execute</td><td class="mono badge-success-text">{settings.confidence_execute}</td><td>Minimum confidence to execute autonomously</td></tr>
             <tr><td>confidence_delegate</td><td class="mono badge-warning-text">{settings.confidence_delegate}</td><td>Minimum confidence to delegate. Below → interrupt()</td></tr>
-            <tr><td>ollama_model_fast</td><td class="mono">{settings.ollama_model_fast}</td><td>Default LLM for all standard calls</td></tr>
-            <tr><td>ollama_model_reason</td><td class="mono">{settings.ollama_model_reason}</td><td>Reasoning LLM (DeepSeek R1) for complex analysis</td></tr>
-            <tr><td>ollama_base_url</td><td class="mono">{settings.ollama_base_url}</td><td>Ollama server URL</td></tr>
+            <tr><td>vllm_local_base_url</td><td class="mono">{settings.vllm_local_base_url}</td><td>vLLM local inference server (Mac Studio, primary)</td></tr>
+            <tr><td>vllm_remote</td><td class="mono">{"configured ✅" if True else "not set"}</td><td>vLLM GPU server URL (g5.xlarge / new rig) — set via Keychain</td></tr>
+            <tr><td>groq_base_url</td><td class="mono">{settings.groq_base_url}</td><td>Groq free cloud API endpoint</td></tr>
             <tr><td>postgres_url</td><td class="mono">{settings.postgres_url}</td><td>PostgreSQL connection string</td></tr>
             <tr><td>redis_url</td><td class="mono">{settings.redis_url}</td><td>Redis connection URL</td></tr>
             <tr><td>neo4j_uri</td><td class="mono">{settings.neo4j_uri}</td><td>Neo4j knowledge graph URI</td></tr>
@@ -926,7 +927,7 @@ def get_admin_html(settings=None) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>jarvis_v2 — LangGraph Admin</title>
+<title>BILLY Admin — FiestyGoat AI</title>
 <style>
   :root {{
     --bg: #0f1117;
@@ -1094,8 +1095,8 @@ def get_admin_html(settings=None) -> str:
 
 <nav class="sidebar">
   <div class="sidebar-logo">
-    <h1>🤖 jarvis_v2</h1>
-    <p>LangGraph Admin — v{settings.app_version}</p>
+    <h1>🤖 BILLY</h1>
+    <p>FiestyGoat AI — Autonomous Revenue System — v{settings.app_version}</p>
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Get Started</div>
@@ -1136,7 +1137,7 @@ def get_admin_html(settings=None) -> str:
         LangGraph is a framework for building stateful, multi-step AI workflows as directed graphs.
         You define <strong>nodes</strong> (Python functions that do work) and <strong>edges</strong> (connections that define execution order).
         State flows through nodes, gets updated at each step, and is checkpointed so runs can be paused and resumed.
-        jarvis_v2 uses LangGraph for all <em>decision workflows</em> (Tier 2) and <em>specialist content agents</em> (Tier 3),
+        BILLY uses LangGraph for all <em>decision workflows</em> (Tier 2) and <em>specialist content agents</em> (Tier 3),
         but deliberately does NOT use it for always-on background workers (Tier 1) to avoid idle token costs.
       </p>
     </div>
