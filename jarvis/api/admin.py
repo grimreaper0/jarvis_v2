@@ -1106,8 +1106,8 @@ def get_admin_html(settings=None) -> str:
   </div>
   <div class="nav-section">
     <div class="nav-section-label">LangGraph Components</div>
-    <button class="nav-item" onclick="showSection('graphs')">🔷 Tier 2 Graphs</button>
     <button class="nav-item" onclick="showSection('workers')">⚡ Tier 1 Workers</button>
+    <button class="nav-item" onclick="showSection('graphs')">🔷 Tier 2 Graphs</button>
     <button class="nav-item" onclick="showSection('agents')">🤖 Tier 3 Agents</button>
   </div>
   <div class="nav-section">
