@@ -930,23 +930,23 @@ def get_admin_html(settings=None) -> str:
 <title>BILLY Admin — FiestyGoat AI</title>
 <style>
   :root {{
-    --bg: #0f1117;
-    --sidebar-bg: #13161f;
-    --card-bg: #1a1d2e;
-    --card-border: #2a2e45;
+    --bg: #080e12;
+    --sidebar-bg: #0a1219;
+    --card-bg: #0f1c24;
+    --card-border: #1a3040;
     --text: #e2e8f0;
-    --text-muted: #8892a4;
-    --accent: #6366f1;
+    --text-muted: #7a9aaa;
+    --accent: #00d4c8;
     --success: #22c55e;
     --warning: #f59e0b;
     --error: #ef4444;
-    --info: #3b82f6;
+    --info: #00b8d4;
     --interrupt: #ec4899;
-    --code-bg: #0d1117;
-    --node-start: #1e3a5f;
-    --node-normal: #1e2d1e;
-    --node-terminal: #2d1e1e;
-    --node-interrupt: #2d1128;
+    --code-bg: #060d11;
+    --node-start: #0a2535;
+    --node-normal: #0a2015;
+    --node-terminal: #251010;
+    --node-interrupt: #1a0a22;
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -956,9 +956,9 @@ def get_admin_html(settings=None) -> str:
   .sidebar {{ width: 240px; min-width: 240px; background: var(--sidebar-bg);
               border-right: 1px solid var(--card-border); display: flex;
               flex-direction: column; overflow-y: auto; }}
-  .sidebar-logo {{ padding: 20px 16px 12px; border-bottom: 1px solid var(--card-border); }}
-  .sidebar-logo h1 {{ font-size: 16px; font-weight: 700; color: var(--accent); }}
-  .sidebar-logo p {{ font-size: 11px; color: var(--text-muted); margin-top: 2px; }}
+  .sidebar-logo {{ padding: 16px 16px 12px; border-bottom: 1px solid var(--card-border); text-align: center; }}
+  .sidebar-logo img {{ width: 120px; height: auto; display: block; margin: 0 auto 6px; }}
+  .sidebar-logo p {{ font-size: 10px; color: var(--text-muted); margin-top: 2px; letter-spacing: 0.05em; }}
   .nav-section {{ padding: 12px 0 4px; }}
   .nav-section-label {{ padding: 0 16px 6px; font-size: 10px; font-weight: 600;
                          color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }}
@@ -1095,8 +1095,8 @@ def get_admin_html(settings=None) -> str:
 
 <nav class="sidebar">
   <div class="sidebar-logo">
-    <h1>🤖 BILLY</h1>
-    <p>FiestyGoat AI — Autonomous Revenue System — v{settings.app_version}</p>
+    <img src="/static/Billy FG AI logo.png" alt="BILLY — FiestyGoat AI" />
+    <p>Autonomous Revenue System — v{settings.app_version}</p>
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Get Started</div>

@@ -26,9 +26,11 @@ class Settings(BaseSettings):
     # Redis coordination layer
     redis_url: str = "redis://localhost:6379"
 
-    # vLLM Local — Mac Studio M2 Max (primary inference server, replaces Ollama)
-    # Start: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000
-    # Models served here use HuggingFace model IDs (not Ollama short names)
+    # MLX Local — Mac Studio M2 Max (Apple Metal inference, OpenAI-compatible API)
+    # Note: vLLM has no MPS backend — use mlx_lm.server instead (installed in venv)
+    # Start: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000 --host 0.0.0.0
+    # On new rig (2x RTX 5060 Ti): VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8000 --tensor-parallel-size 2
+    # Models served here use HuggingFace model IDs (mlx-community/ prefix for 4-bit quantized)
     vllm_local_base_url: str = "http://localhost:8000/v1"
 
     # vLLM Remote — AWS g5.xlarge GPU instance (on-demand, stop when not needed)

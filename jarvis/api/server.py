@@ -1,7 +1,9 @@
 """FastAPI server — REST interface for jarvis_v2 graphs and workers."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Any
 import structlog
@@ -17,11 +19,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="jarvis_v2 API",
+    title="BILLY API",
     description="FiestyGoat AI — LangGraph-native autonomous revenue system",
     version="0.1.0",
     lifespan=lifespan,
 )
+
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 class OpportunityRequest(BaseModel):
