@@ -1,7 +1,8 @@
 """Unit tests for LLMRouter v4 — vLLM-first, no Ollama, task-type routing for BILLY."""
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from jarvis.core.router import LLMRouter, LLMRequest, LLMResponse, LLMBackend, TASK_ROUTING
+from jarvis.core.mandate import OPERATING_MANDATE, MANDATE_SYSTEM_PROMPT
 
 
 @pytest.fixture
@@ -222,3 +223,94 @@ async def test_vllm_remote_wins_over_groq(router):
     router._openai_compat_complete = AsyncMock(return_value=mock_resp)
     resp = await router.complete(LLMRequest(prompt="Analyze", task_type="analysis"))
     assert resp.backend == LLMBackend.VLLM
+
+
+# ── Operating Mandate (Prime Directive 4) ────────────────────────────────────
+
+def test_operating_mandate_is_non_empty():
+    """The verbatim Operating Mandate must exist and contain the 90% confidence requirement."""
+    assert OPERATING_MANDATE
+    assert "90%" in OPERATING_MANDATE
+    assert "never skip" in OPERATING_MANDATE
+
+
+def test_mandate_system_prompt_contains_all_six_principles():
+    """MANDATE_SYSTEM_PROMPT must encode all 6 operating principles."""
+    assert "CONFIDENCE" in MANDATE_SYSTEM_PROMPT
+    assert "QUALITY" in MANDATE_SYSTEM_PROMPT
+    assert "THINK HARD" in MANDATE_SYSTEM_PROMPT
+    assert "PARALLELIZE" in MANDATE_SYSTEM_PROMPT
+    assert "FIX OR ASK" in MANDATE_SYSTEM_PROMPT
+    assert "CONTEXT" in MANDATE_SYSTEM_PROMPT
+
+
+def test_mandate_system_prompt_identifies_billy():
+    """MANDATE_SYSTEM_PROMPT must identify BILLY and FiestyGoat AI LLC."""
+    assert "BILLY" in MANDATE_SYSTEM_PROMPT
+    assert "FiestyGoat AI LLC" in MANDATE_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_mandate_injected_without_task_system(router):
+    """When request.system is empty, MANDATE_SYSTEM_PROMPT is the sole system message."""
+    captured: list[dict] = []
+
+    async def fake_post(self_client, url, *, json, headers, **kwargs):
+        captured.append(json)
+        class R:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 5}}
+        return R()
+
+    import httpx
+    with patch.object(httpx.AsyncClient, "post", fake_post):
+        router._backends = _backends(vllm_local={"Qwen/Qwen3-4B"})
+        router._backends_checked_at = 1e12
+        await router.complete(LLMRequest(prompt="Do something", task_type="simple"))
+
+    msgs = captured[0]["messages"]
+    system_msgs = [m for m in msgs if m["role"] == "system"]
+    assert len(system_msgs) == 1
+    assert system_msgs[0]["content"] == MANDATE_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_mandate_prepended_to_task_system(router):
+    """When request.system is set, mandate is first and task context is appended after."""
+    captured: list[dict] = []
+
+    async def fake_post(self_client, url, *, json, headers, **kwargs):
+        captured.append(json)
+        class R:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 5}}
+        return R()
+
+    import httpx
+    with patch.object(httpx.AsyncClient, "post", fake_post):
+        router._backends = _backends(vllm_local={"Qwen/Qwen3-4B"})
+        router._backends_checked_at = 1e12
+        await router.complete(LLMRequest(
+            prompt="Analyze market",
+            system="You are a trading analyst.",
+            task_type="trading",
+        ))
+
+    msgs = captured[0]["messages"]
+    system_msgs = [m for m in msgs if m["role"] == "system"]
+    assert len(system_msgs) == 1
+    content = system_msgs[0]["content"]
+    # Mandate comes first
+    assert content.startswith(MANDATE_SYSTEM_PROMPT)
+    # Task context is appended — cannot replace the mandate
+    assert "You are a trading analyst." in content
+    mandate_pos = content.find(MANDATE_SYSTEM_PROMPT)
+    task_pos = content.find("You are a trading analyst.")
+    assert mandate_pos < task_pos, "Mandate must appear before task-specific system prompt"
+
+
+def test_mandate_cannot_be_overridden():
+    """MANDATE_SYSTEM_PROMPT starts with BILLY identification — always the anchor."""
+    assert MANDATE_SYSTEM_PROMPT.startswith("You are BILLY")

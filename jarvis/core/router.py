@@ -59,6 +59,8 @@ import httpx
 import structlog
 from pydantic import BaseModel
 
+from jarvis.core.mandate import MANDATE_SYSTEM_PROMPT
+
 log = structlog.get_logger()
 
 
@@ -477,10 +479,16 @@ class LLMRouter:
         extra_headers: dict[str, str] | None = None,
     ) -> LLMResponse:
         """Shared handler for all OpenAI-compatible APIs: vLLM, Groq, DeepSeek, OpenRouter."""
-        messages = []
+        # Operating Mandate (Prime Directive 4) is always the first system message.
+        # Task-specific system prompts are appended after — they cannot override the mandate.
         if request.system:
-            messages.append({"role": "system", "content": request.system})
-        messages.append({"role": "user", "content": request.prompt})
+            system_content = f"{MANDATE_SYSTEM_PROMPT}\n\n---\nTask context:\n{request.system}"
+        else:
+            system_content = MANDATE_SYSTEM_PROMPT
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": request.prompt},
+        ]
 
         payload = {
             "model": model,
