@@ -44,6 +44,22 @@ PRIME_DIRECTIVES = [
         ],
     },
     {
+        "number": 4,
+        "name": "OPERATE WITH CONFIDENCE",
+        "description": "Every action requires ≥90% confidence. Use all tools, critical thinking, "
+                       "and sequential reasoning. Quality over speed. Fix problems or escalate — never skip.",
+        "langgraph_location": "LLMRouter._openai_compat_complete — injected as system prompt prefix on EVERY LLM call",
+        "tier": "Cross-cutting (all tiers)",
+        "color": "#ec4899",
+        "details": [
+            "Injected automatically in LLMRouter._openai_compat_complete() via jarvis/core/mandate.py",
+            "Every LLM call in BILLY (Tier 1, 2, 3) carries the mandate — it cannot be overridden",
+            "Task-specific system prompts are APPENDED after the mandate, not replacing it",
+            "6 principles: CONFIDENCE ≥90%, QUALITY over speed, THINK HARD, PARALLELIZE, FIX OR ASK, CONTEXT",
+            "Full verbatim mandate: 'as you continue to work, these are complicated tasks...'",
+        ],
+    },
+    {
         "number": 3,
         "name": "CONTINUOUSLY LEARN",
         "description": "Never be idle. Always be learning from cutting-edge sources. "
@@ -74,8 +90,13 @@ COMMANDMENTS = [
     },
     {
         "name": "Local-First: Everything on Mac Studio",
-        "rule": "LLM Router tries Ollama first (free), falls back to API keys",
-        "langgraph_equivalent": "LLMRouter.as_langchain_llm() returns OllamaLLM",
+        "rule": "LLM Router tries vLLM local (mlx_lm.server) first ($0), then free cloud APIs, then paid dev-only",
+        "langgraph_equivalent": "LLMRouter TASK_ROUTING — vllm_local first in every task type",
+    },
+    {
+        "name": "Operating Mandate Always Active",
+        "rule": "Prime Directive 4 injected as system prompt on every LLM call — 90%+ confidence, quality over speed, fix or escalate",
+        "langgraph_equivalent": "LLMRouter._openai_compat_complete — MANDATE_SYSTEM_PROMPT prepended to all messages",
     },
     {
         "name": "Fail-Safe: Safety Over Automation",
