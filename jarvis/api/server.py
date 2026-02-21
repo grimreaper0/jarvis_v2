@@ -275,6 +275,21 @@ async def api_keys_status() -> dict:
     return keys
 
 
+@app.get("/graph/stats")
+async def graph_stats() -> dict:
+    """Neo4j knowledge graph statistics — node and relationship counts."""
+    try:
+        from jarvis.core.knowledge_graph import KnowledgeGraph
+        kg = KnowledgeGraph()
+        await kg.connect()
+        stats = await kg.get_graph_stats()
+        await kg.close()
+        return {"status": "ok", **stats}
+    except Exception as exc:
+        log.warning("api.graph_stats_failed", error=str(exc))
+        return {"status": "error", "error": str(exc), "nodes": {}, "relationships": {}}
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_ui() -> HTMLResponse:
     """LangGraph Admin UI — read-only system overview."""

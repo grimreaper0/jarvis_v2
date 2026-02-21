@@ -98,6 +98,7 @@ class HealthWorker(ContinuousWorker):
         checks = await asyncio.gather(
             self._check_redis(),
             self._check_postgres(),
+            self._check_neo4j(),
             self._check_disk(),
             self._check_memory(),
             self._check_llm_inference(),
@@ -113,6 +114,7 @@ class HealthWorker(ContinuousWorker):
             "postgres": self._check_postgres,
             "disk": self._check_disk,
             "memory": self._check_memory,
+            "neo4j": self._check_neo4j,
             "llm": self._check_llm_inference,
             "llm_inference": self._check_llm_inference,
             "supervisor": self._check_supervisor,
@@ -249,6 +251,23 @@ class HealthWorker(ContinuousWorker):
         except Exception as exc:
             log.error("health.memory_check_failed", error=str(exc))
             return CheckResult("memory", "critical", f"Check failed: {exc}", {}, ts)
+
+    async def _check_neo4j(self) -> CheckResult:
+        """Verify Neo4j knowledge graph is responding."""
+        ts = datetime.utcnow().isoformat()
+        try:
+            from jarvis.core.knowledge_graph import KnowledgeGraph
+            kg = KnowledgeGraph()
+            await kg.connect()
+            stats = await kg.get_graph_stats()
+            await kg.close()
+            total_nodes = sum(stats["nodes"].values())
+            total_rels = sum(stats["relationships"].values())
+            metrics = {"total_nodes": total_nodes, "total_relationships": total_rels}
+            return CheckResult("neo4j", "healthy", f"OK ({total_nodes} nodes, {total_rels} rels)", metrics, ts)
+        except Exception as exc:
+            log.error("health.neo4j_check_failed", error=str(exc))
+            return CheckResult("neo4j", "critical", f"Neo4j unreachable: {exc}", {}, ts)
 
     async def _check_llm_inference(self) -> CheckResult:
         """Verify local LLM inference (mlx_lm on port 8001) is responding."""
