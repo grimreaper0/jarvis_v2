@@ -39,6 +39,7 @@ class ContinuousWorker(ABC):
         self._redis: aioredis.Redis | None = None
         self._sync_redis = None
         self._db_pool = None
+        self._kg = None
 
     # ==================== Redis (async) ====================
 
@@ -120,6 +121,20 @@ class ContinuousWorker(ABC):
         await r.rpush(graph_name, json.dumps(task))
         log.debug("worker.pushed_to_graph", graph=graph_name, task_type=task.get("type"))
 
+    # ==================== Knowledge Graph (Neo4j) ====================
+
+    async def _get_kg(self):
+        """Lazy-init KnowledgeGraph connection."""
+        if self._kg is None:
+            try:
+                from jarvis.core.knowledge_graph import KnowledgeGraph
+                self._kg = KnowledgeGraph()
+                await self._kg.connect()
+            except Exception as exc:
+                log.warning("worker.kg_init_failed", error=str(exc))
+                self._kg = None
+        return self._kg
+
     # ==================== Activity logging ====================
 
     async def log_activity(
@@ -128,7 +143,9 @@ class ContinuousWorker(ABC):
         status: str,
         details: dict | None = None,
     ) -> None:
-        """Write one row to the bot_activity table in PostgreSQL."""
+        """Write one row to bot_activity (PostgreSQL) and Activity node (Neo4j)."""
+        now = datetime.utcnow()
+        # PostgreSQL write
         try:
             async with await self._get_db() as conn:
                 async with conn.cursor() as cur:
@@ -143,7 +160,7 @@ class ContinuousWorker(ABC):
                             action,
                             status,
                             json.dumps(details or {}),
-                            datetime.utcnow(),
+                            now,
                         ),
                     )
                     await conn.commit()
@@ -154,6 +171,29 @@ class ContinuousWorker(ABC):
                 action=action,
                 error=str(exc),
             )
+
+        # Neo4j dual-write (fire and forget — never blocks main flow)
+        try:
+            kg = await self._get_kg()
+            if kg:
+                topics = []
+                props = {}
+                if details:
+                    for k in ("symbol", "strategy", "side", "platform", "source"):
+                        if k in details:
+                            props[k] = str(details[k])
+                            topics.append(str(details[k]).lower())
+                await kg.add_activity(
+                    pg_id=f"{self.worker_name}:{now.isoformat()}",
+                    bot_name=self.worker_name,
+                    activity_type=action,
+                    status=status,
+                    created_at=now.isoformat(),
+                    topics=topics or None,
+                    **props,
+                )
+        except Exception as exc:
+            log.debug("worker.kg_write_failed", error=str(exc))
 
     # ==================== Core run loop ====================
 
@@ -209,6 +249,11 @@ class ContinuousWorker(ABC):
             except asyncio.CancelledError:
                 pass
             await self.announce_offline()
+            if self._kg:
+                try:
+                    await self._kg.close()
+                except Exception:
+                    pass
             if self._redis:
                 await self._redis.aclose()
 
