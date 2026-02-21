@@ -354,8 +354,12 @@ def _extract_task_meta(state: ConfidenceState) -> dict[str, Any]:
 # ─────────────────────────── Graph builder ───────────────────────────────────
 
 
-def build_confidence_graph():
+def build_confidence_graph(checkpointer=None):
     """Build and compile the 4-layer confidence evaluation subgraph.
+
+    Args:
+        checkpointer: LangGraph checkpointer. Defaults to MemorySaver (in-memory).
+                      Pass AsyncPostgresSaver for persistent checkpointing in runners.
 
     Flow:
         score_base → score_validation → score_historical → score_reflexive → finalize
@@ -389,7 +393,8 @@ def build_confidence_graph():
     )
     graph.add_edge("clarify_node", END)
 
-    checkpointer = MemorySaver()
+    if checkpointer is None:
+        checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -405,7 +410,7 @@ class ConfidenceGraphRunner:
     QUEUE = "confidence_eval"
 
     def __init__(self) -> None:
-        self.graph = build_confidence_graph()
+        self.graph = None  # built async in run_forever()
         self._redis = None
 
     async def _get_redis(self):
@@ -420,6 +425,16 @@ class ConfidenceGraphRunner:
 
     async def run_forever(self) -> None:
         """Consume from Redis queue and run confidence graph for each request indefinitely."""
+        # Build graph with persistent PostgresSaver checkpointer
+        try:
+            from jarvis.core.checkpointer import get_checkpointer
+            checkpointer = await get_checkpointer()
+            self.graph = build_confidence_graph(checkpointer=checkpointer)
+            log.info("confidence_runner.postgres_checkpointer_ready")
+        except Exception as exc:
+            log.warning("confidence_runner.postgres_checkpointer_failed", error=str(exc))
+            self.graph = build_confidence_graph()  # fallback to MemorySaver
+
         log.info("confidence_runner.starting", queue=self.QUEUE)
         r = await self._get_redis()
 
@@ -479,6 +494,7 @@ class ConfidenceGraphRunner:
                                 "id": thread_id,
                                 "status": "waiting_for_input",
                                 "interrupt": interrupt_val,
+                                "correlation_id": task.get("correlation_id"),
                             })
                             await r.rpush(reply_queue, reply)
                         continue
@@ -503,6 +519,7 @@ class ConfidenceGraphRunner:
                                 "reflexive_score": result.get("reflexive_score"),
                                 "final_score": result.get("final_score"),
                                 "decision": result.get("decision"),
+                                "correlation_id": task.get("correlation_id"),
                             }
                         )
                         await r.rpush(reply_queue, reply)

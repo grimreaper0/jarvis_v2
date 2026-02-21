@@ -216,6 +216,8 @@ async def submit_order(state: TradingState) -> dict[str, Any]:
     signal: dict[str, Any] = state["signal"]
     symbol: str = state["symbol"]
 
+    correlation_id = signal.get("correlation_id", str(uuid4()))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
@@ -226,6 +228,7 @@ async def submit_order(state: TradingState) -> dict[str, Any]:
             "confidence": signal.get("confidence", 0.0),
             "strategy": signal.get("strategy", "unknown"),
             "context": signal.get("context", {}),
+            "correlation_id": correlation_id,
         }
     )
 
@@ -268,8 +271,13 @@ async def reject_order(state: TradingState) -> dict[str, Any]:
 # ─────────────────────────── Graph builder ───────────────────────────────────
 
 
-def build_trading_graph():
-    """Build and compile the trading signal decision graph."""
+def build_trading_graph(checkpointer=None):
+    """Build and compile the trading signal decision graph.
+
+    Args:
+        checkpointer: LangGraph checkpointer. Defaults to MemorySaver (in-memory).
+                      Pass AsyncPostgresSaver for persistent checkpointing in runners.
+    """
     graph = StateGraph(TradingState)
 
     graph.add_node("validate_signal", validate_signal)
@@ -297,7 +305,8 @@ def build_trading_graph():
     graph.add_edge("submit_order", END)
     graph.add_edge("reject_order", END)
 
-    checkpointer = MemorySaver()
+    if checkpointer is None:
+        checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -308,12 +317,12 @@ trading_graph = build_trading_graph()
 
 
 class TradingGraphRunner:
-    """Consume from 'trading_signal' Redis queue and run the trading decision graph."""
+    """Consume from 'trading_decision' Redis queue and run the trading decision graph."""
 
-    QUEUE = "trading_signal"
+    QUEUE = "trading_decision"
 
     def __init__(self) -> None:
-        self.graph = build_trading_graph()
+        self.graph = None  # built async in run_forever()
         self._redis = None
 
     async def _get_redis(self):
@@ -328,6 +337,16 @@ class TradingGraphRunner:
 
     async def run_forever(self) -> None:
         """Consume from Redis queue and run graph for each signal indefinitely."""
+        # Build graph with persistent PostgresSaver checkpointer
+        try:
+            from jarvis.core.checkpointer import get_checkpointer
+            checkpointer = await get_checkpointer()
+            self.graph = build_trading_graph(checkpointer=checkpointer)
+            log.info("trading_runner.postgres_checkpointer_ready")
+        except Exception as exc:
+            log.warning("trading_runner.postgres_checkpointer_failed", error=str(exc))
+            self.graph = build_trading_graph()  # fallback to MemorySaver
+
         log.info("trading_runner.starting", queue=self.QUEUE)
         r = await self._get_redis()
 
@@ -369,6 +388,7 @@ class TradingGraphRunner:
                         order_id=result.get("order_id"),
                         risk_approved=result.get("risk_approved"),
                         position_size=result.get("position_size"),
+                        correlation_id=task.get("correlation_id"),
                     )
                 except Exception as graph_exc:
                     log.error(
