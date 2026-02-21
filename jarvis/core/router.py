@@ -110,7 +110,7 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
     # Fast, simple tasks — smallest/cheapest models first
     "simple": [
         ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),          # ultra-fast local
-        ("vllm_local", "Qwen/Qwen3-4B"),                        # fast local
+        ("vllm_local", "mlx-community/Qwen3-4B-4bit"),            # fast local (MLX)
         ("vllm", "Qwen/Qwen3-4B"),                              # fast on GPU
         ("groq", "qwen/qwen3-32b"),                             # free cloud fallback
         ("deepseek", "deepseek-chat"),                           # cheap cloud fallback
@@ -139,7 +139,7 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
     "long_ctx": [
         ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"), # Qwen3-Coder 480B (256K)
         ("vllm", "Qwen/Qwen3-30B-A3B"),                        # GPU 128K
-        ("vllm_local", "Qwen/Qwen3-4B"),                       # local 32K fallback
+        ("vllm_local", "mlx-community/Qwen3-4B-4bit"),          # local 32K fallback (MLX)
         ("groq", "qwen/qwen3-32b"),
     ],
 
@@ -172,7 +172,7 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
 
     # Content quality, Instagram/YouTube/TikTok copy
     "content": [
-        ("vllm_local", "Qwen/Qwen3-4B"),
+        ("vllm_local", "mlx-community/Qwen3-4B-4bit"),
         ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),
         ("groq", "qwen/qwen3-32b"),
         ("deepseek", "deepseek-chat"),
@@ -214,7 +214,7 @@ class LLMRouter:
     # Model constants for common use cases
     REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
     STANDARD_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
-    FAST_MODEL = "Qwen/Qwen3-4B"
+    FAST_MODEL = "mlx-community/Qwen3-4B-4bit"
 
     def __init__(self, settings=None, memory=None):
         from config.settings import get_settings
