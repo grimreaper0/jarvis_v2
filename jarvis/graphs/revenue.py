@@ -390,8 +390,13 @@ def _score_reflexive(base: float, validation: float, historical: float) -> float
 # ─────────────────────────── Graph builder ───────────────────────────────────
 
 
-def build_revenue_graph():
-    """Build and compile the revenue opportunity evaluation graph."""
+def build_revenue_graph(checkpointer=None):
+    """Build and compile the revenue opportunity evaluation graph.
+
+    Args:
+        checkpointer: LangGraph checkpointer. Defaults to MemorySaver (in-memory).
+                      Pass AsyncPostgresSaver for persistent checkpointing in runners.
+    """
     graph = StateGraph(RevenueState)
 
     graph.add_node("load_opportunity", load_opportunity)
@@ -421,7 +426,8 @@ def build_revenue_graph():
     graph.add_edge("delegate_opportunity", END)
     graph.add_edge("skip_opportunity", END)
 
-    checkpointer = MemorySaver()
+    if checkpointer is None:
+        checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -437,7 +443,7 @@ class RevenueGraphRunner:
     QUEUE = "revenue_opportunity"
 
     def __init__(self) -> None:
-        self.graph = build_revenue_graph()
+        self.graph = None  # built async in run_forever()
         self._redis = None
 
     async def _get_redis(self):
@@ -452,6 +458,16 @@ class RevenueGraphRunner:
 
     async def run_forever(self) -> None:
         """Consume from Redis queue and run graph for each task indefinitely."""
+        # Build graph with persistent PostgresSaver checkpointer
+        try:
+            from jarvis.core.checkpointer import get_checkpointer
+            checkpointer = await get_checkpointer()
+            self.graph = build_revenue_graph(checkpointer=checkpointer)
+            log.info("revenue_runner.postgres_checkpointer_ready")
+        except Exception as exc:
+            log.warning("revenue_runner.postgres_checkpointer_failed", error=str(exc))
+            self.graph = build_revenue_graph()  # fallback to MemorySaver
+
         log.info("revenue_runner.starting", queue=self.QUEUE)
         r = await self._get_redis()
 

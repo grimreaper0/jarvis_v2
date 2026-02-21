@@ -398,8 +398,13 @@ async def reject_content(state: ContentState) -> dict[str, Any]:
 # ─────────────────────────── Graph builder ───────────────────────────────────
 
 
-def build_content_graph():
-    """Build and compile the content quality gate graph."""
+def build_content_graph(checkpointer=None):
+    """Build and compile the content quality gate graph.
+
+    Args:
+        checkpointer: LangGraph checkpointer. Defaults to MemorySaver (in-memory).
+                      Pass AsyncPostgresSaver for persistent checkpointing in runners.
+    """
     graph = StateGraph(ContentState)
 
     graph.add_node("score_content", score_content)
@@ -422,7 +427,8 @@ def build_content_graph():
     graph.add_edge("approve_content", END)
     graph.add_edge("reject_content", END)
 
-    checkpointer = MemorySaver()
+    if checkpointer is None:
+        checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -445,7 +451,7 @@ class ContentGraphRunner:
     ]
 
     def __init__(self) -> None:
-        self.graph = build_content_graph()
+        self.graph = None  # built async in run_forever()
         self._redis = None
 
     async def _get_redis(self):
@@ -460,6 +466,16 @@ class ContentGraphRunner:
 
     async def run_forever(self) -> None:
         """Consume from content queues and run graph for each item indefinitely."""
+        # Build graph with persistent PostgresSaver checkpointer
+        try:
+            from jarvis.core.checkpointer import get_checkpointer
+            checkpointer = await get_checkpointer()
+            self.graph = build_content_graph(checkpointer=checkpointer)
+            log.info("content_runner.postgres_checkpointer_ready")
+        except Exception as exc:
+            log.warning("content_runner.postgres_checkpointer_failed", error=str(exc))
+            self.graph = build_content_graph()  # fallback to MemorySaver
+
         log.info("content_runner.starting", queues=self.QUEUES)
         r = await self._get_redis()
 

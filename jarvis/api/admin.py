@@ -123,7 +123,7 @@ GRAPHS = [
         "description": "Evaluates revenue opportunities end-to-end. Enriches with AutoMem history, "
                        "scores confidence, and routes to the correct Tier 3 agent queue.",
         "state": "RevenueState",
-        "checkpointer": "MemorySaver",
+        "checkpointer": "PostgresSaver (runners) / MemorySaver (API)",
         "nodes": [
             {"name": "load_opportunity", "type": "start", "desc": "Validates required fields (task_type, description). Sets defaults."},
             {"name": "enrich_opportunity", "type": "normal", "desc": "AutoMem pattern search adds historical context to opportunity."},
@@ -149,7 +149,7 @@ GRAPHS = [
         "description": "Trading signal decision pipeline. Validates signals, applies financial guardrails, "
                        "sizes positions via Kelly Criterion, submits to Alpaca via Tier 1 TradingWorker.",
         "state": "TradingState",
-        "checkpointer": "MemorySaver",
+        "checkpointer": "PostgresSaver (runners) / MemorySaver (API)",
         "nodes": [
             {"name": "validate_signal", "type": "start", "desc": "Checks required fields (symbol, action, price, confidence). Normalises action to uppercase."},
             {"name": "check_guardrails", "type": "normal", "desc": "Financial guardrails: max $100/trade, $500 daily loss, 3 consecutive losses = circuit breaker."},
@@ -168,7 +168,7 @@ GRAPHS = [
         "description": "Platform-specific content quality gate. Fully deterministic scoring (no LLM) "
                        "for speed. Checks rate limits, quality floors, and blocked keywords.",
         "state": "ContentState",
-        "checkpointer": "MemorySaver",
+        "checkpointer": "PostgresSaver (runners) / MemorySaver (API)",
         "nodes": [
             {"name": "score_content", "type": "start", "desc": "Platform-specific scoring (Instagram, YouTube, Newsletter, TikTok, generic). Returns quality_score 0.0-1.0."},
             {"name": "check_guidelines", "type": "normal", "desc": "Rate limit check (platform posts/hour), quality floor (≥0.70), blocked keywords sweep."},
@@ -192,7 +192,7 @@ GRAPHS = [
                        "with its own checkpoint. When confidence < 0.60, interrupt() pauses the graph "
                        "and surfaces a decision to the operator.",
         "state": "ConfidenceState",
-        "checkpointer": "MemorySaver",
+        "checkpointer": "PostgresSaver (runners) / MemorySaver (API)",
         "has_interrupt": True,
         "nodes": [
             {"name": "score_base", "type": "start", "desc": "Task clarity: recognised type +0.35, description ≥20 chars +0.35, non-empty context +0.30. Max: 1.0"},
@@ -1551,7 +1551,7 @@ def get_admin_html(settings=None) -> str:
           <tr><td><code>StateGraph</code></td><td>The main graph class. You add nodes and edges, then compile() it.</td></tr>
           <tr><td><code>TypedDict state</code></td><td>The data structure that flows through all nodes. Each node reads it and returns a dict of updates to merge back in.</td></tr>
           <tr><td><code>add_messages reducer</code></td><td>Special reducer for the messages field — appends instead of overwrites. Enables conversation history.</td></tr>
-          <tr><td><code>MemorySaver</code></td><td>In-memory checkpointer. Saves state per thread_id. Allows pause/resume. Resets on server restart.</td></tr>
+          <tr><td><code>PostgresSaver / MemorySaver</code></td><td>Checkpointer — saves graph state per thread_id. PostgresSaver (long-running runners) persists across restarts. MemorySaver (API endpoints) is in-memory only.</td></tr>
           <tr><td><code>thread_id</code></td><td>Unique run identifier. Same thread_id = same conversation. UUID for each new run.</td></tr>
           <tr><td><code>interrupt(value)</code></td><td>Pauses graph at that exact point, saves state to checkpointer, returns value to caller. Resume with Command(resume=...).</td></tr>
           <tr><td><code>Command(resume=value)</code></td><td>Resumes a frozen graph. The value becomes the return value of the interrupted interrupt() call.</td></tr>
