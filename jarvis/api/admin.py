@@ -61,18 +61,22 @@ PRIME_DIRECTIVES = [
     },
     {
         "number": 3,
-        "name": "CONTINUOUSLY LEARN",
-        "description": "Never be idle. Always be learning from cutting-edge sources. "
-                       "Research Bot must ALWAYS be running.",
-        "langgraph_location": "Tier 1 ContinuousWorkers — explicitly NOT LangGraph",
-        "tier": "Tier 1 (No LangGraph)",
+        "name": "IMPROVE ITSELF",
+        "description": "Continuously evolve capabilities, approach true sentience. "
+                       "Research, discover, and implement improvements to own code, agents, workers, and graphs — autonomously. "
+                       "Anthropic generates ~100% of Claude Code with Claude itself. BILLY must match this standard.",
+        "langgraph_location": "All Tiers — Research in Tier 1, Evolution decisions in Tier 2, Implementation in Tier 3",
+        "tier": "Cross-cutting (all tiers)",
         "color": "#f59e0b",
         "details": [
-            "LearningWorker: 28 RSS feeds (arXiv, Reddit, research labs, revenue blogs)",
-            "ResearchWorker: 19 dark-hole sources (MoltBook, Medium, ProductHunt, HN)",
-            "Explicitly uses raw Python + Redis — no LangGraph to avoid idle token waste",
-            "supervisord: autostart=true, autorestart=true — NEVER offline",
-            "Idle behavior: scrapes all sources every hour even with empty queue",
+            "Self-modify code: Propose AND implement upgrades to agents, workers, graphs, infrastructure",
+            "Research continuously: /research-deep from academic (arXiv), industry (LangChain, OpenAI, Anthropic), community (Reddit, HuggingFace, GitHub trending)",
+            "Discover and adopt: New frameworks, architectures, techniques — like discovering LangGraph and implementing it",
+            "Monitor own performance: Track latency, accuracy, confidence scores, error rates — identify bottlenecks and FIX without being asked",
+            "Use free bots for research/execution, /grok-super and Claude for final architectural decisions",
+            "LearningWorker + ResearchWorker: 28 RSS feeds + 19 dark-hole sources — NEVER offline (supervisord autorestart=true)",
+            "User adds hardware → BILLY must detect and USE new resources automatically",
+            "The Virtuous Cycle: #3 improves #1 (better assistant) and #2 (better revenue). All directives are interdependent.",
         ],
     },
 ]
@@ -1300,6 +1304,10 @@ def get_admin_html(settings=None) -> str:
     <button class="nav-item" onclick="showSection('api')">🔌 API Reference</button>
     <button class="nav-item" onclick="showSection('settings')">⚙️ Settings</button>
   </div>
+  <div class="nav-section" style="border-top: 1px solid var(--card-border); margin-top: 8px; padding-top: 12px;">
+    <a href="/dashboard" class="nav-item" style="color: var(--accent); text-decoration: none;">📊 Live Dashboard →</a>
+    <a href="http://localhost:3001" target="_blank" class="nav-item" style="text-decoration: none;">📝 The Codex ↗</a>
+  </div>
 </nav>
 
 <main class="main">
@@ -1354,8 +1362,8 @@ def get_admin_html(settings=None) -> str:
         <thead><tr><th>Service</th><th>Port</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><strong>BILLY API (jarvis_v2)</strong></td><td class="mono badge-success-text">8506</td><td>FastAPI — FIXED, never change</td></tr>
-          <tr><td>mlx_lm.server (local LLM)</td><td class="mono">8001</td><td>Apple Metal inference. mlx-community/Qwen3-4B-4bit</td></tr>
-          <tr><td>The Codex — Backend</td><td class="mono">8000</td><td>FastAPI (Docker), trailing slash required on API calls</td></tr>
+          <tr><td>mlx_lm.server (local LLM)</td><td class="mono">8000</td><td>Apple Metal inference. mlx-community/Qwen3-4B-4bit</td></tr>
+          <tr><td>The Codex — Backend</td><td class="mono">8001</td><td>FastAPI (native), trailing slash required on API calls</td></tr>
           <tr><td>The Codex — Frontend</td><td class="mono">3001</td><td>nginx/React — <a href="http://localhost:3001" style="color:var(--accent)">localhost:3001</a></td></tr>
           <tr><td>jarvis_v1 Dashboard</td><td class="mono">8502</td><td>Streamlit</td></tr>
           <tr><td>Neo4j</td><td class="mono">7687</td><td>bolt:// — FiestyGoatNeo4j2026!</td></tr>
@@ -1372,12 +1380,12 @@ def get_admin_html(settings=None) -> str:
         <tbody>
           <tr>
             <td><strong>mlx_lm.server</strong> (local primary)</td>
-            <td class="mono small-text">venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001 --host 0.0.0.0</td>
-            <td>Apple Metal native. Port 8001. ~1.9s latency. vLLM has NO MPS backend — mlx_lm is the correct path on Mac.</td>
+            <td class="mono small-text">venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000 --host 0.0.0.0</td>
+            <td>Apple Metal native. Port 8000. ~1.9s latency. vLLM has NO MPS backend — mlx_lm is the correct path on Mac.</td>
           </tr>
           <tr>
             <td><strong>New Rig</strong> (arriving ~2 weeks)</td>
-            <td class="mono small-text">VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8001 --tensor-parallel-size 2</td>
+            <td class="mono small-text">VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8000 --tensor-parallel-size 2</td>
             <td>Intel Core Ultra 9 + 2x RTX 5060 Ti 16GB = 32GB VRAM. Real vLLM on CUDA.</td>
           </tr>
         </tbody>
@@ -1389,17 +1397,19 @@ def get_admin_html(settings=None) -> str:
       <table class="data-table">
         <thead><tr><th>ID</th><th>Quest</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td class="mono">QUE-001</td><td>DOL VETS Grant Application</td><td>Active</td></tr>
-          <tr><td class="mono">QUE-002</td><td>AARP Community Challenge</td><td>Active</td></tr>
-          <tr><td class="mono">QUE-003</td><td>Digital Promise K-12 AI Infrastructure ($50K-$250K, Mar 8 deadline)</td><td>Active — FULL CONTEXT SAVED</td></tr>
-          <tr><td class="mono">QUE-004</td><td>WOSB Certification (free, Natalie qualifies)</td><td>Active</td></tr>
-          <tr><td class="mono">QUE-005</td><td>MBE/NMSDC Certification</td><td>Active</td></tr>
-          <tr><td class="mono">QUE-006</td><td>Mercury Bank Sub-Account Setup</td><td>Active</td></tr>
-          <tr><td class="mono">QUE-007</td><td>FiestyGoat AI Architecture Strategy</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-001</td><td>DOL VETS Grant Application</td><td>In Development</td></tr>
+          <tr><td class="mono">QUE-002</td><td>AARP Community Challenge</td><td>In Development</td></tr>
+          <tr><td class="mono">QUE-003</td><td>Digital Promise K-12 AI Infrastructure ($50K-$250K, Mar 8 deadline)</td><td>Ready</td></tr>
+          <tr><td class="mono">QUE-004</td><td>WOSB Certification (free, Natalie qualifies)</td><td>Ready</td></tr>
+          <tr><td class="mono">QUE-005</td><td>MBE/NMSDC Certification</td><td>Defining</td></tr>
+          <tr><td class="mono">QUE-006</td><td>Mercury Bank Sub-Account Setup</td><td>Ready</td></tr>
+          <tr><td class="mono">QUE-007</td><td>FiestyGoat AI Architecture Strategy</td><td>In Development</td></tr>
+          <tr><td class="mono">QUE-008</td><td>BILLY React Dashboard</td><td style="color:var(--success)">Deployed ✅</td></tr>
+          <tr><td class="mono">QUE-009</td><td>BILLY Evolver Super-Graph (Self-Improvement)</td><td>Defining</td></tr>
         </tbody>
       </table>
       <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">
-        API: <span class="mono">GET http://localhost:8000/api/v1/solutions/</span> (requires Codex Docker running — port 8000, trailing slash required)
+        API: <span class="mono">GET http://localhost:8001/api/v1/solutions/</span> (native backend — port 8001, trailing slash required)
       </p>
     </div>
   </section>
@@ -1446,10 +1456,10 @@ def get_admin_html(settings=None) -> str:
         <tbody>
           <tr>
             <td><strong>mlx_lm.server</strong> (local primary)</td>
-            <td class="mono">localhost:8001/v1</td>
-            <td class="mono">8001</td>
+            <td class="mono">localhost:8000/v1</td>
+            <td class="mono">8000</td>
             <td>mlx-community/Qwen3-4B-4bit</td>
-            <td class="svc-status" data-url="http://localhost:8001/v1/models">...</td>
+            <td class="svc-status" data-url="http://localhost:8000/v1/models">...</td>
           </tr>
           <tr>
             <td><strong>Groq</strong> (cloud free)</td>
@@ -1511,10 +1521,10 @@ def get_admin_html(settings=None) -> str:
           </tr>
           <tr>
             <td><strong>The Codex Backend</strong></td>
-            <td class="mono">localhost:8000</td>
-            <td class="mono">8000</td>
-            <td>FastAPI (Docker) — solutions-catalog</td>
-            <td class="svc-status" data-url="http://localhost:8000/health">...</td>
+            <td class="mono">localhost:8001</td>
+            <td class="mono">8001</td>
+            <td>FastAPI (native) — solutions_catalog DB</td>
+            <td class="svc-status" data-url="http://localhost:8001/health">...</td>
           </tr>
         </tbody>
       </table>

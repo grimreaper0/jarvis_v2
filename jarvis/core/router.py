@@ -19,8 +19,8 @@ vLLM       = inference server. Downloads model from HuggingFace, serves it via
 
 Backends
 --------
-- vllm_local  : mlx_lm.server on Mac Studio M2 Max (localhost:8001) — primary, always-on, $0
-                Start: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001 --host 0.0.0.0
+- vllm_local  : mlx_lm.server on Mac Studio M2 Max (localhost:8000) — primary, always-on, $0
+                Start: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000 --host 0.0.0.0
 - vllm        : vLLM on AWS g5.xlarge — heavy workloads, on-demand ($0.73/hr)
                 Set URL: keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')
 - groq         : Groq cloud free tier (Qwen3-32B, DeepSeek R1 distills, fast)
@@ -345,7 +345,7 @@ class LLMRouter:
 
         raise RuntimeError(
             f"No LLM backend available for task_type={task_type!r}. "
-            "Start mlx_lm: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001"
+            "Start mlx_lm: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000"
         )
 
     # ------------------------------------------------------------------
