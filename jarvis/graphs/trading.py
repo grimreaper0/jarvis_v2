@@ -216,6 +216,8 @@ async def submit_order(state: TradingState) -> dict[str, Any]:
     signal: dict[str, Any] = state["signal"]
     symbol: str = state["symbol"]
 
+    correlation_id = signal.get("correlation_id", str(uuid4()))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
@@ -226,6 +228,7 @@ async def submit_order(state: TradingState) -> dict[str, Any]:
             "confidence": signal.get("confidence", 0.0),
             "strategy": signal.get("strategy", "unknown"),
             "context": signal.get("context", {}),
+            "correlation_id": correlation_id,
         }
     )
 
@@ -369,6 +372,7 @@ class TradingGraphRunner:
                         order_id=result.get("order_id"),
                         risk_approved=result.get("risk_approved"),
                         position_size=result.get("position_size"),
+                        correlation_id=task.get("correlation_id"),
                     )
                 except Exception as graph_exc:
                     log.error(

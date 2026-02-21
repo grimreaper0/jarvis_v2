@@ -111,17 +111,49 @@ class ContinuousWorker(ABC):
 
     # ==================== Tier 2 task dispatch ====================
 
-    async def push_task_to_graph(self, task: dict, graph_name: str) -> None:
+    async def push_task_to_graph(self, task: dict, graph_name: str,
+                                correlation_id: str | None = None) -> None:
         """Push a task to a Tier 2 LangGraph worker queue.
 
         Tier 2 workers watch Redis queues named after their graph (e.g.
         "revenue_opportunity", "trading_decision", "content_gate").
+
+        If correlation_id is provided, it's injected into the task so the
+        entire pipeline can be traced end-to-end.
         """
+        if correlation_id:
+            task["correlation_id"] = correlation_id
+        elif "correlation_id" not in task:
+            # Auto-generate if none exists — every pipeline gets one
+            import uuid
+            task["correlation_id"] = str(uuid.uuid4())
+
         r = await self._get_async_redis()
         await r.rpush(graph_name, json.dumps(task))
-        log.debug("worker.pushed_to_graph", graph=graph_name, task_type=task.get("type"))
+        log.debug("worker.pushed_to_graph", graph=graph_name,
+                   task_type=task.get("type"),
+                   correlation_id=task.get("correlation_id"))
 
     # ==================== Knowledge Graph (Neo4j) ====================
+
+    # Activities that represent actual knowledge (decisions, discoveries, content)
+    # Everything else is monitoring noise — stays in PostgreSQL only.
+    KG_WORTHY_ACTIONS: set[str] = {
+        # Revenue pipeline
+        "opportunity_evaluate", "opportunity_delegate", "opportunity_clarify",
+        "opportunity_execute", "opportunity_skip",
+        # Content pipeline
+        "content_plan", "content_score", "content_queue", "content_post",
+        "content_approve", "content_reject", "content_regenerate",
+        # Trading pipeline
+        "trade_signal", "trade_execute", "trade_reject", "trade_close",
+        "signal_generated", "position_opened", "position_closed",
+        # Discovery & learning
+        "research_scrape", "pattern_extract", "pattern_promote",
+        "discovery", "viral_detected",
+        # Confidence decisions
+        "confidence_evaluate", "confidence_gate",
+    }
 
     async def _get_kg(self):
         """Lazy-init KnowledgeGraph connection."""
@@ -142,10 +174,24 @@ class ContinuousWorker(ABC):
         action: str,
         status: str,
         details: dict | None = None,
+        correlation_id: str | None = None,
     ) -> None:
-        """Write one row to bot_activity (PostgreSQL) and Activity node (Neo4j)."""
+        """Write one row to bot_activity (PostgreSQL) and optionally to Neo4j.
+
+        Only knowledge-worthy actions (decisions, discoveries, content, trades)
+        get written to Neo4j. Monitoring noise stays in PostgreSQL only.
+
+        Args:
+            correlation_id: UUID that threads an opportunity through the entire
+                pipeline (Tier 1 → 2 → 3). Pass this to enable full lineage
+                tracking in Neo4j.
+        """
         now = datetime.utcnow()
-        # PostgreSQL write
+        enriched_details = details.copy() if details else {}
+        if correlation_id:
+            enriched_details["correlation_id"] = correlation_id
+
+        # PostgreSQL write (ALL activities — complete audit trail)
         try:
             async with await self._get_db() as conn:
                 async with conn.cursor() as cur:
@@ -159,7 +205,7 @@ class ContinuousWorker(ABC):
                             self.worker_name,
                             action,
                             status,
-                            json.dumps(details or {}),
+                            json.dumps(enriched_details),
                             now,
                         ),
                     )
@@ -172,19 +218,31 @@ class ContinuousWorker(ABC):
                 error=str(exc),
             )
 
-        # Neo4j dual-write (fire and forget — never blocks main flow)
+        # Neo4j dual-write (ONLY knowledge-worthy actions)
+        if action not in self.KG_WORTHY_ACTIONS:
+            return
+
         try:
             kg = await self._get_kg()
             if kg:
                 topics = []
                 props = {}
-                if details:
-                    for k in ("symbol", "strategy", "side", "platform", "source"):
-                        if k in details:
-                            props[k] = str(details[k])
-                            topics.append(str(details[k]).lower())
+                if enriched_details:
+                    for k in ("symbol", "strategy", "side", "platform", "source",
+                              "correlation_id", "score", "quality_score"):
+                        if k in enriched_details:
+                            props[k] = str(enriched_details[k])
+                    for k in ("symbol", "strategy", "platform", "source", "topic"):
+                        val = enriched_details.get(k)
+                        if val and isinstance(val, str):
+                            topics.append(val.lower())
+
+                node_id = f"{self.worker_name}:{now.isoformat()}"
+                if correlation_id:
+                    node_id = f"{correlation_id}:{self.worker_name}:{action}"
+
                 await kg.add_activity(
-                    pg_id=f"{self.worker_name}:{now.isoformat()}",
+                    pg_id=node_id,
                     bot_name=self.worker_name,
                     activity_type=action,
                     status=status,
@@ -192,8 +250,27 @@ class ContinuousWorker(ABC):
                     topics=topics or None,
                     **props,
                 )
+
+                # If we have a correlation_id, link to other activities in the same pipeline
+                if correlation_id:
+                    await self._link_correlated_activities(kg, correlation_id, node_id)
         except Exception as exc:
             log.debug("worker.kg_write_failed", error=str(exc))
+
+    async def _link_correlated_activities(self, kg, correlation_id: str,
+                                          current_node_id: str) -> None:
+        """Link this activity to previous activities with the same correlation_id."""
+        driver = await kg._ensure_connected()
+        async with driver.session() as s:
+            # Find all other activities with this correlation_id and create NEXT edges
+            await s.run(
+                "MATCH (prev:Activity) "
+                "WHERE prev.correlation_id = $cid AND prev.pg_id <> $current "
+                "WITH prev ORDER BY prev.created_at DESC LIMIT 1 "
+                "MATCH (curr:Activity {pg_id: $current}) "
+                "MERGE (prev)-[:LED_TO]->(curr)",
+                cid=correlation_id, current=current_node_id,
+            )
 
     # ==================== Core run loop ====================
 

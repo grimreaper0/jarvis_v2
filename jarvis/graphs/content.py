@@ -319,12 +319,15 @@ async def approve_content(state: ContentState) -> dict[str, Any]:
     content: dict[str, Any] = state["content"]
     platform: str = state["platform"]
 
+    correlation_id = content.get("correlation_id", state.get("content", {}).get("correlation_id", str(uuid4())))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
             "platform": platform,
             "quality_score": state["quality_score"],
             "content": content,
+            "correlation_id": correlation_id,
         }
     )
 
@@ -356,6 +359,8 @@ async def reject_content(state: ContentState) -> dict[str, Any]:
     platform: str = state["platform"]
     reason: str = state.get("rejection_reason") or "quality_below_threshold"
 
+    correlation_id = content.get("correlation_id", state.get("content", {}).get("correlation_id", str(uuid4())))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
@@ -363,6 +368,7 @@ async def reject_content(state: ContentState) -> dict[str, Any]:
             "quality_score": state.get("quality_score", 0.0),
             "rejection_reason": reason,
             "content": content,
+            "correlation_id": correlation_id,
         }
     )
 

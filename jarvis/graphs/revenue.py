@@ -224,6 +224,8 @@ async def execute_opportunity(state: RevenueState) -> dict[str, Any]:
     task_type: str = opp["task_type"]
     queue_name: str = QUEUE_MAP.get(task_type, "general_task")
 
+    correlation_id = opp.get("correlation_id", str(uuid4()))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
@@ -233,6 +235,7 @@ async def execute_opportunity(state: RevenueState) -> dict[str, Any]:
             "confidence": state.get("evaluation_score", 0.0),
             "review_required": False,
             "source": opp.get("source", "revenue_graph"),
+            "correlation_id": correlation_id,
         }
     )
 
@@ -261,6 +264,8 @@ async def delegate_opportunity(state: RevenueState) -> dict[str, Any]:
     """Push opportunity to human review queue with full context."""
     opp = state["opportunity"]
 
+    correlation_id = opp.get("correlation_id", str(uuid4()))
+
     payload = json.dumps(
         {
             "id": str(uuid4()),
@@ -271,6 +276,7 @@ async def delegate_opportunity(state: RevenueState) -> dict[str, Any]:
             "review_required": True,
             "reason": "confidence_below_execute_threshold",
             "source": opp.get("source", "revenue_graph"),
+            "correlation_id": correlation_id,
         }
     )
 
@@ -494,6 +500,7 @@ class RevenueGraphRunner:
                         action=result.get("action"),
                         score=result.get("evaluation_score", 0.0),
                         delegated_to=result.get("delegated_to"),
+                        correlation_id=task.get("correlation_id"),
                     )
 
                 except Exception as graph_exc:

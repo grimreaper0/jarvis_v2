@@ -479,6 +479,7 @@ class ConfidenceGraphRunner:
                                 "id": thread_id,
                                 "status": "waiting_for_input",
                                 "interrupt": interrupt_val,
+                                "correlation_id": task.get("correlation_id"),
                             })
                             await r.rpush(reply_queue, reply)
                         continue
@@ -503,6 +504,7 @@ class ConfidenceGraphRunner:
                                 "reflexive_score": result.get("reflexive_score"),
                                 "final_score": result.get("final_score"),
                                 "decision": result.get("decision"),
+                                "correlation_id": task.get("correlation_id"),
                             }
                         )
                         await r.rpush(reply_queue, reply)
