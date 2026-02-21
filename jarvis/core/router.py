@@ -587,7 +587,7 @@ class LLMRouter:
     def _get_keychain_key(self, key_name: str) -> str | None:
         try:
             import keyring
-            for service in ("jarvis_v2", "personal_agent_hub"):
+            for service in ("jarvis_v2", "personal-agent-hub", "personal_agent_hub"):
                 val = keyring.get_password(service, key_name)
                 if val:
                     return val
