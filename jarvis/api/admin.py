@@ -725,7 +725,98 @@ GLOSSARY = [
         "langgraph_equivalent": "External store (complementary to checkpointer)",
         "how_we_use": "PostgreSQL + pgvector. Stores conversations, patterns, golden rules, audit log. Queried by score_historical node for pattern boosts.",
     },
+    {
+        "term_familiar": "Knowledge Graph",
+        "langgraph_equivalent": "Neo4j graph database (long-term relational memory)",
+        "how_we_use": "Neo4j stores entities + relationships from knowledge-worthy actions. Complementary to pgvector: Neo4j answers 'how does X relate to Y?' while pgvector answers 'find similar to X'.",
+    },
+    {
+        "term_familiar": "Correlation ID",
+        "langgraph_equivalent": "UUID threading through Tier 1 → Redis → Tier 2 → Redis → Tier 3",
+        "how_we_use": "Every pipeline run gets a correlation_id. LED_TO edges in Neo4j link correlated activities for full lineage tracking. Propagated through all graph payloads.",
+    },
+    {
+        "term_familiar": "Knowledge-Worthy Action",
+        "langgraph_equivalent": "KG_WORTHY_ACTIONS filter in ContinuousWorker",
+        "how_we_use": "Only 26 action types (decisions, trades, content, discoveries) are written to Neo4j. Routine actions (heartbeats, scrapes) stay in PostgreSQL only.",
+    },
 ]
+
+# ---------------------------------------------------------------------------
+# Knowledge Graph & Correlation System (Neo4j)
+# ---------------------------------------------------------------------------
+
+KNOWLEDGE_GRAPH = {
+    "description": (
+        "Neo4j knowledge graph stores entities and relationships from knowledge-worthy actions. "
+        "Complementary to PostgreSQL + pgvector — Neo4j answers 'how does X relate to Y?' "
+        "while pgvector answers 'find similar to X'. Only knowledge-worthy actions are written "
+        "to Neo4j; routine operations stay in PostgreSQL."
+    ),
+    "connection": "bolt://localhost:7687",
+    "node_types": [
+        {"type": "Bot", "description": "System bots (learning_bot, trading_bot, etc.)", "example": "(:Bot {name: 'trading_bot'})"},
+        {"type": "Activity", "description": "Knowledge-worthy actions (trades, content, discoveries)", "example": "(:Activity {action: 'trade_execute', symbol: 'NVDA'})"},
+        {"type": "Pattern", "description": "Extracted patterns from AutoMem", "example": "(:Pattern {description: 'VWAP works best pre-market'})"},
+        {"type": "Source", "description": "RSS feeds, research sources", "example": "(:Source {name: 'arXiv cs.AI'})"},
+        {"type": "Symbol", "description": "Stock tickers for trading lineage", "example": "(:Symbol {ticker: 'NVDA'})"},
+    ],
+    "relationship_types": [
+        {"type": "PERFORMED", "from": "Bot", "to": "Activity", "description": "Bot performed a knowledge-worthy action"},
+        {"type": "LED_TO", "from": "Activity", "to": "Activity", "description": "Correlation ID lineage — links activities in the same pipeline run"},
+        {"type": "EXTRACTED", "from": "Activity", "to": "Pattern", "description": "Activity produced a reusable pattern"},
+        {"type": "DISCOVERED_FROM", "from": "Activity", "to": "Source", "description": "Activity originated from a research source"},
+        {"type": "TRADES", "from": "Activity", "to": "Symbol", "description": "Trading activity involved this symbol"},
+    ],
+    "dual_store_split": {
+        "neo4j": [
+            "Entity relationships (Bot → Activity → Pattern)",
+            "Pipeline lineage (LED_TO chains via correlation_id)",
+            "Cross-bot knowledge transfer",
+            "Temporal reasoning ('what happened before X?')",
+            "Graph traversal queries ('all activities that led to this trade')",
+        ],
+        "postgresql_pgvector": [
+            "Semantic similarity search ('find patterns like X')",
+            "Full conversation history with embeddings",
+            "Confidence audit log (every gate decision)",
+            "Golden rule storage and retrieval",
+            "High-frequency reads (dashboard, status queries)",
+        ],
+    },
+}
+
+CORRELATION_SYSTEM = {
+    "description": (
+        "Correlation IDs thread through Tier 1 → Redis → Tier 2 → Redis → Tier 3 pipelines. "
+        "Every pipeline run starts with a UUID that propagates through all payloads. "
+        "Neo4j LED_TO edges connect activities sharing the same correlation_id, "
+        "creating end-to-end lineage chains."
+    ),
+    "flow": [
+        {"tier": "Tier 1", "step": "ContinuousWorker.push_task_to_graph()", "action": "Generates correlation_id (UUID), attaches to Redis payload"},
+        {"tier": "Redis", "step": "Queue: revenue_opportunity / trading_signal / etc.", "action": "Payload carries correlation_id field"},
+        {"tier": "Tier 2", "step": "Graph nodes (execute/delegate/submit)", "action": "Reads correlation_id from state, propagates to outbound Redis payloads"},
+        {"tier": "Redis", "step": "Queue: instagram_task / trading_execution / etc.", "action": "Payload carries correlation_id downstream"},
+        {"tier": "Tier 3", "step": "Agent subgraph execution", "action": "Final output tagged with same correlation_id"},
+        {"tier": "Neo4j", "step": "_link_correlated_activities()", "action": "Creates LED_TO edges between all activities sharing the correlation_id"},
+    ],
+    "kg_worthy_actions": [
+        "opportunity_evaluate", "opportunity_delegate", "opportunity_clarify",
+        "opportunity_execute", "opportunity_skip",
+        "content_plan", "content_score", "content_queue", "content_post",
+        "content_approve", "content_reject", "content_regenerate",
+        "trade_signal", "trade_execute", "trade_reject", "trade_close",
+        "signal_generated", "position_opened", "position_closed",
+        "research_scrape", "pattern_extract", "pattern_promote",
+        "discovery", "viral_detected",
+        "confidence_evaluate", "confidence_gate",
+    ],
+    "non_kg_actions_examples": [
+        "heartbeat", "health_check", "rss_scrape", "idle_loop",
+        "queue_poll", "cache_refresh", "log_rotate",
+    ],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -943,6 +1034,48 @@ def get_admin_html(settings=None) -> str:
           </tbody>
         </table>"""
 
+    # ── Knowledge Graph section ──
+    kg = KNOWLEDGE_GRAPH
+    kg_nodes_html = ""
+    for nt in kg["node_types"]:
+        kg_nodes_html += f"""<tr>
+          <td><strong>{nt["type"]}</strong></td>
+          <td>{nt["description"]}</td>
+          <td class="mono small-text">{nt["example"]}</td>
+        </tr>"""
+
+    kg_rels_html = ""
+    for rt in kg["relationship_types"]:
+        kg_rels_html += f"""<tr>
+          <td><strong>{rt["type"]}</strong></td>
+          <td class="mono">{rt["from"]} → {rt["to"]}</td>
+          <td>{rt["description"]}</td>
+        </tr>"""
+
+    kg_neo4j_list = "".join(f"<li>{item}</li>" for item in kg["dual_store_split"]["neo4j"])
+    kg_pg_list = "".join(f"<li>{item}</li>" for item in kg["dual_store_split"]["postgresql_pgvector"])
+
+    # ── Correlation System section ──
+    corr = CORRELATION_SYSTEM
+    corr_flow_html = ""
+    tier_colors = {"Tier 1": "#f59e0b", "Redis": "#ef4444", "Tier 2": "#6366f1", "Tier 3": "#22c55e", "Neo4j": "#00d4c8"}
+    for step in corr["flow"]:
+        color = tier_colors.get(step["tier"], "var(--text)")
+        corr_flow_html += f"""<tr>
+          <td><span style="color:{color};font-weight:600">{step["tier"]}</span></td>
+          <td class="mono small-text">{step["step"]}</td>
+          <td>{step["action"]}</td>
+        </tr>"""
+
+    kg_worthy_badges = " ".join(
+        f'<span class="badge badge-info" style="margin:2px;font-size:11px">{a}</span>'
+        for a in sorted(corr["kg_worthy_actions"])
+    )
+    non_kg_badges = " ".join(
+        f'<span class="badge badge-muted" style="margin:2px;font-size:11px">{a}</span>'
+        for a in corr["non_kg_actions_examples"]
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1138,6 +1271,11 @@ def get_admin_html(settings=None) -> str:
     <button class="nav-item" onclick="showSection('guardrails')">🛡️ Guardrails</button>
     <button class="nav-item" onclick="showSection('confidence')">📊 Confidence Gate</button>
     <button class="nav-item" onclick="showSection('llms')">🧠 LLM Roster</button>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">Knowledge &amp; Lineage</div>
+    <button class="nav-item" onclick="showSection('knowledge-graph')">🔗 Knowledge Graph</button>
+    <button class="nav-item" onclick="showSection('correlation')">🧬 Correlation &amp; Lineage</button>
   </div>
   <div class="nav-section">
     <div class="nav-section-label">Reference</div>
@@ -1456,7 +1594,7 @@ def get_admin_html(settings=None) -> str:
   TradingWorker     queue: trading_execution    idle: performance analysis + strategy optimization
   HealthWorker      queue: health_check         idle: system health check every 5 minutes
          │
-         │  push_task_to_graph() → Redis queues
+         │  push_task_to_graph() → Redis queues (+ correlation_id)
          ▼
 <span class="arch-t2">TIER 2 — LangGraph StateGraphs (decision workflows)</span>
   Revenue Graph     queue: revenue_opportunity  routes to Tier 3 agents
@@ -1536,8 +1674,9 @@ def get_admin_html(settings=None) -> str:
     T0 --> REDIS
     T1 --> REDIS
     T2 --> REDIS
-    T2 --> NEO
-    T3 --> NEO
+    T1 -->|"KG-worthy actions"| NEO
+    T2 -->|"correlation_id"| NEO
+    T3 -->|"correlation_id"| NEO
 
     RG --> IG
     RG --> YT
@@ -1567,6 +1706,35 @@ def get_admin_html(settings=None) -> str:
           }});
         }});
       </script>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Data Persistence Architecture</h3></div>
+      <table class="data-table">
+        <thead><tr><th>Store</th><th>Purpose</th><th>Query Pattern</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>PostgreSQL + pgvector</strong></td>
+            <td>Conversations, patterns, golden rules, audit log, embeddings. High-frequency reads.</td>
+            <td>"Find patterns similar to X" (semantic similarity search)</td>
+          </tr>
+          <tr>
+            <td><strong>Neo4j</strong></td>
+            <td>Entity relationships, pipeline lineage (LED_TO), cross-bot knowledge transfer.</td>
+            <td>"How does X relate to Y?" (graph traversal)</td>
+          </tr>
+          <tr>
+            <td><strong>Redis</strong></td>
+            <td>Inter-tier communication, task queues, pub/sub coordination.</td>
+            <td>BLPOP/RPUSH (queue), PUBLISH/SUBSCRIBE (events)</td>
+          </tr>
+          <tr>
+            <td><strong>MemorySaver (in-memory)</strong></td>
+            <td>LangGraph checkpointer — persists graph state within a thread_id. Resets on restart.</td>
+            <td>graph.get_state(config) — planned migration to PostgresSaver for persistence across restarts</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="card">
@@ -1712,6 +1880,146 @@ llm = router.as_langchain_llm()   # returns OllamaLLM</pre>
     </div>
   </section>
 
+  <!-- ========== KNOWLEDGE GRAPH ========== -->
+  <section id="section-knowledge-graph" class="section">
+    <h2 class="section-title">🔗 Knowledge Graph (Neo4j)</h2>
+    <p class="section-subtitle">Neo4j stores entities and relationships from knowledge-worthy actions. Complementary to pgvector — answers "how does X relate to Y?" vs "find similar to X".</p>
+
+    <div class="card" style="border-left: 4px solid #00d4c8; margin-bottom: 20px;">
+      <h3 style="color: #00d4c8; margin-bottom: 12px;">Dual-Store Architecture Decision</h3>
+      <p class="card-desc">{kg["description"]}</p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">Connection: <code>{kg["connection"]}</code></p>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Node Types</h3></div>
+      <table class="data-table">
+        <thead><tr><th>Type</th><th>Description</th><th>Example</th></tr></thead>
+        <tbody>{kg_nodes_html}</tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Relationship Types</h3></div>
+      <table class="data-table">
+        <thead><tr><th>Relationship</th><th>Direction</th><th>Description</th></tr></thead>
+        <tbody>{kg_rels_html}</tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>What Goes Where? (Dual-Store Split)</h3></div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div>
+          <h4 style="color:#00d4c8; margin-bottom:8px;">Neo4j (Relationships)</h4>
+          <ul style="list-style:none; padding:0;">{kg_neo4j_list}</ul>
+        </div>
+        <div>
+          <h4 style="color:#6366f1; margin-bottom:8px;">PostgreSQL + pgvector (Similarity)</h4>
+          <ul style="list-style:none; padding:0;">{kg_pg_list}</ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Live Graph Stats</h3></div>
+      <div id="kg-stats-container">
+        <p style="color:var(--text-muted)">Loading Neo4j stats from /graph/stats...</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== CORRELATION & LINEAGE ========== -->
+  <section id="section-correlation" class="section">
+    <h2 class="section-title">🧬 Correlation &amp; Lineage</h2>
+    <p class="section-subtitle">Correlation IDs thread through the full Tier 1 → 2 → 3 pipeline. LED_TO edges in Neo4j create end-to-end lineage chains.</p>
+
+    <div class="card" style="border-left: 4px solid #ec4899; margin-bottom: 20px;">
+      <h3 style="color: #ec4899; margin-bottom: 12px;">How It Works</h3>
+      <p class="card-desc">{corr["description"]}</p>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Correlation ID Flow (End-to-End)</h3></div>
+      <table class="data-table">
+        <thead><tr><th>Tier</th><th>Component</th><th>Action</th></tr></thead>
+        <tbody>{corr_flow_html}</tbody>
+      </table>
+      <div class="arch-diagram" style="margin-top:16px; font-size:13px;">
+<span style="color:#f59e0b">Tier 1 Worker</span> ──correlation_id──▶ <span style="color:#ef4444">Redis Queue</span> ──correlation_id──▶ <span style="color:#6366f1">Tier 2 Graph</span> ──correlation_id──▶ <span style="color:#ef4444">Redis Queue</span> ──correlation_id──▶ <span style="color:#22c55e">Tier 3 Agent</span>
+                                                                                                           │
+                                                                                                           ▼
+                                                                                               <span style="color:#00d4c8">Neo4j: LED_TO edges</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Knowledge-Worthy Actions (26 types → Neo4j)</h3></div>
+      <p class="card-desc" style="margin-bottom:12px;">Only these action types are written to Neo4j. Everything else stays in PostgreSQL only. This prevents noise from routine operations (heartbeats, scrapes, cache refreshes) from polluting the knowledge graph.</p>
+      <div style="margin-bottom:16px;">
+        <h4 style="color:#22c55e; margin-bottom:8px;">✅ Written to Neo4j (KG_WORTHY_ACTIONS)</h4>
+        <div>{kg_worthy_badges}</div>
+      </div>
+      <div>
+        <h4 style="color:#64748b; margin-bottom:8px;">⚪ PostgreSQL Only (examples)</h4>
+        <div>{non_kg_badges}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Where Correlation IDs Are Propagated</h3></div>
+      <table class="data-table">
+        <thead><tr><th>Graph</th><th>Node(s)</th><th>How</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Revenue Graph</strong></td>
+            <td class="mono">execute_opportunity, delegate_opportunity</td>
+            <td>Reads correlation_id from opportunity dict, attaches to Redis payload sent to Tier 3 queues</td>
+          </tr>
+          <tr>
+            <td><strong>Trading Graph</strong></td>
+            <td class="mono">submit_order</td>
+            <td>Reads correlation_id from signal dict, attaches to trading_execution Redis payload</td>
+          </tr>
+          <tr>
+            <td><strong>Content Gate</strong></td>
+            <td class="mono">approve_content, reject_content</td>
+            <td>Reads correlation_id from content dict, attaches to publish/regenerate Redis payload</td>
+          </tr>
+          <tr>
+            <td><strong>Confidence Graph</strong></td>
+            <td class="mono">finalize (reply payloads)</td>
+            <td>Includes correlation_id in both interrupted and completed API response payloads</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+        <strong>Source:</strong> ContinuousWorker.push_task_to_graph() generates the initial correlation_id.
+        ContinuousWorker._link_correlated_activities() creates LED_TO edges in Neo4j after logging.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Lineage Query Examples (Cypher)</h3></div>
+      <pre style="font-size:12px;">
+// Find the full pipeline for a specific correlation ID
+MATCH (a:Activity {{correlation_id: "abc-123"}})-[:LED_TO*]->(b:Activity)
+RETURN a, b ORDER BY a.created_at
+
+// Find all trades that originated from a research discovery
+MATCH (d:Activity {{action: "discovery"}})-[:LED_TO*]->(t:Activity {{action: "trade_execute"}})
+RETURN d.description, t.symbol, t.confidence
+
+// Get the lineage chain for a rejected trade
+MATCH path = (start:Activity)-[:LED_TO*]->(rejected:Activity {{action: "trade_reject"}})
+RETURN path
+
+// Count activities per bot in the knowledge graph
+MATCH (b:Bot)-[:PERFORMED]->(a:Activity)
+RETURN b.name, COUNT(a) ORDER BY COUNT(a) DESC</pre>
+    </div>
+  </section>
+
   <!-- ========== STATES ========== -->
   <section id="section-states" class="section">
     <h2 class="section-title">📋 State Schemas</h2>
@@ -1736,7 +2044,15 @@ llm = router.as_langchain_llm()   # returns OllamaLLM</pre>
       </div>
       <div class="api-endpoint">
         <span class="api-method method-get">GET</span><span class="api-path">/admin/data</span>
-        <div class="api-desc">All config as JSON (thresholds, LLM models, guardrail values).</div>
+        <div class="api-desc">All config as JSON (thresholds, LLM models, guardrail values, Neo4j stats, correlation system info).</div>
+      </div>
+      <div class="api-endpoint">
+        <span class="api-method method-get">GET</span><span class="api-path">/graph/stats</span>
+        <div class="api-desc">Neo4j knowledge graph statistics — node and relationship counts by type.</div>
+      </div>
+      <div class="api-endpoint">
+        <span class="api-method method-get">GET</span><span class="api-path">/api/keys/status</span>
+        <div class="api-desc">Check which cloud LLM API keys are configured (no values exposed).</div>
       </div>
       <div class="api-endpoint">
         <span class="api-method method-get">GET</span><span class="api-path">/workers/status</span>
@@ -1844,8 +2160,37 @@ llm = router.as_langchain_llm()   # returns OllamaLLM</pre>
     }}
   }}
 
+  // Fetch live Neo4j Knowledge Graph stats
+  async function loadKGStats() {{
+    const container = document.getElementById('kg-stats-container');
+    if (!container) return;
+    try {{
+      const resp = await fetch('/graph/stats');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      if (data.status === 'ok') {{
+        let nodesHtml = '<table class="data-table"><thead><tr><th>Node Label</th><th>Count</th></tr></thead><tbody>';
+        for (const [label, count] of Object.entries(data.nodes || {{}})) {{
+          nodesHtml += '<tr><td><strong>' + label + '</strong></td><td class="mono">' + count.toLocaleString() + '</td></tr>';
+        }}
+        nodesHtml += '</tbody></table>';
+        let relsHtml = '<table class="data-table" style="margin-top:12px"><thead><tr><th>Relationship Type</th><th>Count</th></tr></thead><tbody>';
+        for (const [type, count] of Object.entries(data.relationships || {{}})) {{
+          relsHtml += '<tr><td><strong>' + type + '</strong></td><td class="mono">' + count.toLocaleString() + '</td></tr>';
+        }}
+        relsHtml += '</tbody></table>';
+        container.innerHTML = '<span style="color:#22c55e">🟢 Connected</span>' + nodesHtml + relsHtml;
+      }} else {{
+        container.innerHTML = '<span style="color:#ef4444">🔴 ' + (data.error || 'unavailable') + '</span>';
+      }}
+    }} catch (e) {{
+      container.innerHTML = '<span style="color:#ef4444">🔴 Neo4j unreachable: ' + e.message + '</span>';
+    }}
+  }}
+
   // Run on load
   checkServices();
+  loadKGStats();
 </script>
 </body>
 </html>"""
