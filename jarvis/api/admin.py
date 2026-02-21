@@ -1572,12 +1572,14 @@ def get_admin_html(settings=None) -> str:
     <div class="card">
       <div class="card-header"><h3>Why Tier 1 is NOT LangGraph</h3></div>
       <p class="card-desc">
-        LangGraph supervisor-agent loops burn LLM tokens on every iteration — even when there's nothing to do.
-        For always-on 24/7 workers that mostly sit idle waiting for new RSS articles or trading signals,
-        this would cost real money. Instead, Tier 1 uses raw Python + Redis: <code>BLPOP</code> blocks with
-        zero cost until work arrives. When no work arrives for 1 hour, workers run their idle_loop()
-        (scraping sources) then block again. LangGraph is reserved for workflows where the branching
-        logic and state tracking genuinely justify the overhead.
+        LangGraph supervisor loops call the LLM on every iteration to decide "what next?" — even when there's
+        nothing to do. Our default LLM (mlx_lm / Qwen3-4B-4bit) is free, so this isn't a dollar cost problem.
+        It's a <strong>GPU contention</strong> problem: 4 idle workers constantly hitting the LLM steals GPU
+        bandwidth from Tier 2/3 agents doing actual productive work (generating content, analyzing trades).
+        Each supervisor cycle burns ~2-3 seconds of GPU time for zero value. Instead, Tier 1 uses raw Python +
+        Redis: <code>BLPOP</code> blocks with zero CPU/GPU until work arrives. When no work arrives for 1 hour,
+        workers run their idle_loop() (scraping sources) then block again. Individual workers can still use any
+        LLM backend for their actual work — the architecture just doesn't waste compute on orchestration overhead.
       </p>
     </div>
   </section>
