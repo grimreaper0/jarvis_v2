@@ -299,10 +299,23 @@ async def admin_ui() -> HTMLResponse:
 
 @app.get("/admin/data")
 async def admin_data() -> dict:
-    """Admin config as JSON — all thresholds, LLM models, guardrail values."""
+    """Admin config as JSON — all thresholds, LLM models, guardrail values, Neo4j stats."""
     from config.settings import get_settings
     from jarvis.api.admin import GRAPHS, WORKERS, AGENTS, GUARDRAILS, LLMS, PRIME_DIRECTIVES, COMMANDMENTS
+    from jarvis.workers.base import ContinuousWorker
     settings = get_settings()
+
+    # Neo4j graph stats (non-fatal)
+    neo4j_stats = {"status": "unavailable", "nodes": {}, "relationships": {}}
+    try:
+        from jarvis.core.knowledge_graph import KnowledgeGraph
+        kg = KnowledgeGraph()
+        await kg.connect()
+        neo4j_stats = {"status": "ok", **(await kg.get_graph_stats())}
+        await kg.close()
+    except Exception as exc:
+        neo4j_stats = {"status": "error", "error": str(exc), "nodes": {}, "relationships": {}}
+
     return {
         "settings": {
             "confidence_execute": settings.confidence_execute,
@@ -317,4 +330,12 @@ async def admin_data() -> dict:
         "guardrails": GUARDRAILS,
         "llms": [{"name": l["name"], "provider": l["provider"], "cost": l["cost"]} for l in LLMS],
         "prime_directives": [{"number": p["number"], "name": p["name"]} for p in PRIME_DIRECTIVES],
+        "knowledge_graph": neo4j_stats,
+        "correlation_system": {
+            "enabled": True,
+            "kg_worthy_actions": sorted(ContinuousWorker.KG_WORTHY_ACTIONS),
+            "description": "Correlation IDs thread through Tier 1 → 2 → 3 pipelines. "
+                           "Only knowledge-worthy actions are written to Neo4j. "
+                           "LED_TO edges link correlated activities for lineage tracking.",
+        },
     }
