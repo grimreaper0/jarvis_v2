@@ -19,25 +19,24 @@ vLLM       = inference server. Downloads model from HuggingFace, serves it via
 
 Backends
 --------
-- vllm_local  : vLLM on Mac Studio M2 Max (localhost:8000) — primary, always-on, $0
-                Start: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000
+- vllm_local  : mlx_lm.server on Mac Studio M2 Max (localhost:8001) — primary, always-on, $0
+                Start: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001 --host 0.0.0.0
 - vllm        : vLLM on AWS g5.xlarge — heavy workloads, on-demand ($0.73/hr)
                 Set URL: keyring.set_password('jarvis_v2', 'vllm_base_url', 'http://<ip>:8000/v1')
-- groq         : Groq cloud free tier (llama-3.3-70b, deepseek-r1 distills, fast)
+- groq         : Groq cloud free tier (Qwen3-32B, DeepSeek R1 distills, fast)
                  Get key: https://console.groq.com (no credit card)
 - deepseek     : DeepSeek API (V3.2 + R1 reasoner, $0.07/M tokens)
                  Get key: https://platform.deepseek.com
-- openrouter   : OpenRouter free pool (Qwen3.5, Llama 3.1, Mistral)
+- openrouter   : OpenRouter free pool (Qwen3-Coder-480B, DeepSeek R1)
                  Get key: https://openrouter.ai
 - grok         : xAI Grok API (key configured, for validation)
 - claude       : Anthropic Claude — DEVELOPMENT USE ONLY
 
-Models on Mac Studio (vLLM local, 32GB RAM):
-  Qwen/Qwen3-4B                             ~2.5GB  — fast general (NEW Qwen3 family)
+Models on Mac Studio (mlx_lm.server, 32GB RAM, Apple Metal):
+  mlx-community/Qwen3-4B-4bit               ~2.5GB  — fast general (primary)
   Qwen/Qwen2.5-0.5B-Instruct               ~0.5GB  — ultra-fast simple tasks
   deepseek-ai/DeepSeek-R1-Distill-Qwen-7B  ~4.7GB  — local reasoning
   Qwen/Qwen2.5-Coder-1.5B-Instruct         ~1.0GB  — local coding
-  meta-llama/Llama-3.2-3B-Instruct         ~2.0GB  — general fallback
   mistralai/Mistral-7B-Instruct-v0.3       ~4.1GB  — creative writing
 
 Models on g5.xlarge (vLLM remote, 24GB A10G VRAM):
@@ -46,8 +45,8 @@ Models on g5.xlarge (vLLM remote, 24GB A10G VRAM):
   mistralai/Devstral-Small-2505            ~14GB   — coding specialist
   Qwen/Qwen3-4B                            ~2.5GB  — fast routing model
 
-Qwen3.5-397B-A17B — available via OpenRouter API (free tier) or DeepSeek-style API.
-  Full 397B model does NOT fit g5.xlarge (24GB VRAM). Use via cloud API.
+Qwen3-Coder-480B-A35B — available via OpenRouter API (free tier).
+  Full 480B model does NOT fit g5.xlarge (24GB VRAM). Use via cloud API.
 """
 
 import re
@@ -113,8 +112,8 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
         ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),          # ultra-fast local
         ("vllm_local", "Qwen/Qwen3-4B"),                        # fast local
         ("vllm", "Qwen/Qwen3-4B"),                              # fast on GPU
-        ("groq", "llama-3.3-70b-versatile"),                    # free cloud fallback
-        ("openrouter", "meta-llama/llama-3.1-8b-instruct:free"),
+        ("groq", "qwen/qwen3-32b"),                             # free cloud fallback
+        ("deepseek", "deepseek-chat"),                           # cheap cloud fallback
     ],
 
     # Deep reasoning — DeepSeek R1 family
@@ -122,34 +121,34 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
         ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
         ("vllm", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"),
         ("vllm", "Qwen/Qwen3-30B-A3B"),
-        ("groq", "deepseek-r1-distill-llama-70b"),
         ("deepseek", "deepseek-reasoner"),
-        ("openrouter", "deepseek/deepseek-r1:free"),
+        ("groq", "qwen/qwen3-32b"),                             # Qwen3 reasoning fallback
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"),
     ],
 
     # Code generation
     "coding": [
         ("vllm_local", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
         ("vllm", "mistralai/Devstral-Small-2505"),              # Devstral-24B
-        ("groq", "llama-3.3-70b-versatile"),
-        ("openrouter", "qwen/qwen-2.5-coder-32b-instruct:free"),
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"), # Qwen3-Coder 480B free
         ("deepseek", "deepseek-chat"),
+        ("groq", "qwen/qwen3-32b"),
     ],
 
-    # Long context — Qwen3.5 (256K) via OpenRouter API, then GPU 128K
+    # Long context — Qwen3-Coder (256K) via OpenRouter, then GPU 128K
     "long_ctx": [
-        ("openrouter", "qwen/qwen3.5-397b-a17b:free"),         # Qwen3.5 API (256K)
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"), # Qwen3-Coder 480B (256K)
         ("vllm", "Qwen/Qwen3-30B-A3B"),                        # GPU 128K
         ("vllm_local", "Qwen/Qwen3-4B"),                       # local 32K fallback
-        ("groq", "llama-3.1-70b-versatile"),
+        ("groq", "qwen/qwen3-32b"),
     ],
 
     # Creative writing, captions, marketing copy
     "creative": [
         ("vllm_local", "mistralai/Mistral-7B-Instruct-v0.3"),
         ("vllm", "Qwen/Qwen3-30B-A3B"),
-        ("groq", "mixtral-8x7b-32768"),
-        ("openrouter", "mistralai/mistral-7b-instruct:free"),
+        ("groq", "qwen/qwen3-32b"),
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"),
         ("grok", "grok-4-fast-reasoning"),
     ],
 
@@ -157,26 +156,26 @@ TASK_ROUTING: dict[str, list[tuple[str, str]]] = {
     "trading": [
         ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
         ("vllm", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"),
-        ("groq", "deepseek-r1-distill-llama-70b"),
         ("deepseek", "deepseek-reasoner"),
-        ("groq", "llama-3.3-70b-versatile"),
+        ("groq", "qwen/qwen3-32b"),
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"),
     ],
 
     # General analysis, scoring — GPU primary for quality
     "analysis": [
         ("vllm_local", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"),
         ("vllm", "Qwen/Qwen3-30B-A3B"),
-        ("groq", "llama-3.3-70b-versatile"),
         ("deepseek", "deepseek-chat"),
-        ("openrouter", "qwen/qwen3.5-397b-a17b:free"),
+        ("groq", "qwen/qwen3-32b"),
+        ("openrouter", "qwen/qwen3-coder-480b-a35b-07-25:free"),
     ],
 
     # Content quality, Instagram/YouTube/TikTok copy
     "content": [
         ("vllm_local", "Qwen/Qwen3-4B"),
         ("vllm_local", "Qwen/Qwen2.5-0.5B-Instruct"),
-        ("groq", "llama-3.3-70b-versatile"),
-        ("openrouter", "meta-llama/llama-3.1-8b-instruct:free"),
+        ("groq", "qwen/qwen3-32b"),
+        ("deepseek", "deepseek-chat"),
     ],
 }
 
@@ -321,8 +320,8 @@ class LLMRouter:
                 "vllm_local": (self.REASONING_MODEL if reasoning else self.FAST_MODEL),
                 "vllm": ("deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
                          if reasoning else "Qwen/Qwen3-30B-A3B"),
-                "groq": ("deepseek-r1-distill-llama-70b"
-                         if reasoning else "llama-3.3-70b-versatile"),
+                "groq": ("qwen/qwen3-32b"
+                         if reasoning else "qwen/qwen3-32b"),
                 "deepseek": ("deepseek-reasoner" if reasoning else "deepseek-chat"),
                 "grok": "grok-4-fast-reasoning",
                 "claude": "claude-sonnet-4-6",
@@ -346,7 +345,7 @@ class LLMRouter:
 
         raise RuntimeError(
             f"No LLM backend available for task_type={task_type!r}. "
-            "Start vLLM: VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --device mps --port 8000"
+            "Start mlx_lm: venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001"
         )
 
     # ------------------------------------------------------------------

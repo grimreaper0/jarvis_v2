@@ -42,6 +42,12 @@ def test_no_ollama_in_routing():
             assert backend != "ollama", f"Ollama found in {task_type}: {backend}/{model}"
 
 
+def test_no_llama_in_routing():
+    for task_type, entries in TASK_ROUTING.items():
+        for backend, model in entries:
+            assert "llama" not in model.lower(), f"Llama model found in {task_type}: {backend}/{model}"
+
+
 def test_vllm_local_is_first_for_local_tasks():
     for task in ["simple", "reasoning", "coding", "trading", "analysis", "content"]:
         assert TASK_ROUTING[task][0][0] == "vllm_local", f"Expected vllm_local first for {task}"
@@ -52,9 +58,9 @@ def test_reasoning_uses_deepseek_r1():
     assert any("deepseek" in m.lower() or "r1" in m.lower() for m in models)
 
 
-def test_long_ctx_has_qwen35_via_openrouter():
+def test_long_ctx_has_qwen3_coder_via_openrouter():
     entries = TASK_ROUTING["long_ctx"]
-    assert any(b == "openrouter" and "qwen3.5" in m.lower() for b, m in entries)
+    assert any(b == "openrouter" and "qwen3-coder" in m.lower() for b, m in entries)
 
 
 # ── LLMBackend enum ─────────────────────────────────────────────────────────
@@ -99,11 +105,11 @@ def test_simple_picks_vllm_local(router):
     assert backend == "vllm_local"
 
 
-def test_reasoning_falls_to_groq_when_no_vllm(router):
-    b = _backends(groq=True)
+def test_reasoning_falls_to_deepseek_when_no_vllm(router):
+    b = _backends(deepseek=True)
     backend, model = router._select_route("reasoning", True, None, b)
-    assert backend == "groq"
-    assert "r1" in model.lower() or "deepseek" in model.lower()
+    assert backend == "deepseek"
+    assert "deepseek" in model.lower()
 
 
 def test_vllm_remote_beats_groq_for_analysis(router):
@@ -168,7 +174,7 @@ async def test_complete_routes_to_vllm_local(router):
 async def test_complete_falls_back_to_groq(router):
     router._backends = _backends(groq=True)
     router._backends_checked_at = 1e12
-    mock_resp = LLMResponse(content="ok", backend=LLMBackend.GROQ, model="llama-3.3-70b-versatile")
+    mock_resp = LLMResponse(content="ok", backend=LLMBackend.GROQ, model="qwen/qwen3-32b")
     router._openai_compat_complete = AsyncMock(return_value=mock_resp)
     resp = await router.complete(LLMRequest(prompt="Hi", task_type="simple"))
     assert resp.backend == LLMBackend.GROQ
