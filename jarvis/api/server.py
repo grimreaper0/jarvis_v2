@@ -292,8 +292,7 @@ async def admin_data() -> dict:
         "settings": {
             "confidence_execute": settings.confidence_execute,
             "confidence_delegate": settings.confidence_delegate,
-            "ollama_model_fast": settings.ollama_model_fast,
-            "ollama_model_reason": settings.ollama_model_reason,
+            "vllm_local_base_url": settings.vllm_local_base_url,
             "api_port": settings.api_port,
             "app_version": settings.app_version,
         },

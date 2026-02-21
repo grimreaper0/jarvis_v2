@@ -308,9 +308,9 @@ trading_graph = build_trading_graph()
 
 
 class TradingGraphRunner:
-    """Consume from 'trading_signal' Redis queue and run the trading decision graph."""
+    """Consume from 'trading_decision' Redis queue and run the trading decision graph."""
 
-    QUEUE = "trading_signal"
+    QUEUE = "trading_decision"
 
     def __init__(self) -> None:
         self.graph = build_trading_graph()
