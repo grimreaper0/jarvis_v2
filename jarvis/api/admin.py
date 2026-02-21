@@ -1101,6 +1101,7 @@ def get_admin_html(settings=None) -> str:
   <div class="nav-section">
     <div class="nav-section-label">Get Started</div>
     <button class="nav-item active" onclick="showSection('help')">📖 Help &amp; Concepts</button>
+    <button class="nav-item" onclick="showSection('about')">🏠 About BILLY</button>
     <button class="nav-item" onclick="showSection('directives')">🎯 Prime Directives</button>
     <button class="nav-item" onclick="showSection('architecture')">🏗️ Architecture</button>
   </div>
@@ -1125,6 +1126,106 @@ def get_admin_html(settings=None) -> str:
 </nav>
 
 <main class="main">
+
+  <!-- ========== ABOUT BILLY ========== -->
+  <section id="section-about" class="section">
+    <h2 class="section-title">🏠 About BILLY</h2>
+    <p class="section-subtitle">System context, architecture overview, and the Operating Mandate — reference this every session.</p>
+
+    <div class="card" style="border-left: 4px solid #f59e0b; margin-bottom: 20px;">
+      <h3 style="color: #f59e0b; margin-bottom: 12px;">⚡ Operating Mandate</h3>
+      <p style="font-style: italic; font-size: 14px; line-height: 1.7; color: var(--text);">
+        "As you continue to work, these are complicated tasks. Make sure you're using all tools, reasoning and logic available to you and save as much context as necessary to continue with <strong>90%+ confidence</strong> in all actions. If you can't get to 90%+ confidence ask questions and do research. Use <strong>Critical Thinking, Task Tracking and Sequential Thinking</strong> as needed. <strong>Accuracy and Quality over speed and time.</strong> Do as much work <strong>in parallel</strong> as you can. If something is broken always <strong>fix it or prompt for help, never skip.</strong>"
+      </p>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+        This mandate is always active. Applied at every session start, after every context compaction, and embedded in BILLY's Prime Directives.
+      </p>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">System Overview</h3>
+      <table class="data-table">
+        <thead><tr><th>System</th><th>What It Is</th><th>Location</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>BILLY AI</strong></td>
+            <td>Autonomous revenue system — LangGraph-native replacement for all of jarvis_v1. Named after Billy Goat (FiestyGoat AI LLC).</td>
+            <td class="mono">/Users/TehFiestyGoat/Development/jarvis_v2/<br>github.com/grimreaper0/jarvis_v2</td>
+          </tr>
+          <tr>
+            <td><strong>The Codex</strong></td>
+            <td>Project management system — quests (QUE-XXX), ideas, inklings. Originally a work project, ported to personal use. Docker container.</td>
+            <td class="mono">/Users/TehFiestyGoat/Downloads/solutions-catalog-main/<br>github.com/grimreaper0/the_codex</td>
+          </tr>
+          <tr>
+            <td><strong>FiestyGoat AI LLC</strong></td>
+            <td>CA Multi-Member LLC (EIN: 41-4302206). Natalie Kaiser 51% CEO, Ernest Kaiser 49% CTO. Purpose: AI Education for Underserved Communities.</td>
+            <td class="mono">Entity No: B20260063405<br>Bank: Mercury (approved 02/17/2026)</td>
+          </tr>
+          <tr>
+            <td><strong>jarvis_v1</strong></td>
+            <td>Legacy system — still running via cron/supervisor. Being replaced by BILLY. ChromaDB + Ollama + Streamlit dashboard at port 8502.</td>
+            <td class="mono">/Users/TehFiestyGoat/Development/personal-agent-hub/<br>(OpenClaw dashboard being deleted)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">Port Map</h3>
+      <table class="data-table">
+        <thead><tr><th>Service</th><th>Port</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>BILLY API (jarvis_v2)</strong></td><td class="mono badge-success-text">8506</td><td>FastAPI — FIXED, never change</td></tr>
+          <tr><td>mlx_lm.server (local LLM)</td><td class="mono">8000</td><td>⚠️ CONFLICTS with Codex backend. Cannot run simultaneously.</td></tr>
+          <tr><td>The Codex — Backend</td><td class="mono">8000</td><td>⚠️ CONFLICTS with MLX. FastAPI, trailing slash required on API calls.</td></tr>
+          <tr><td>The Codex — Frontend</td><td class="mono">3001</td><td>nginx/React — <a href="http://localhost:3001" style="color:var(--accent)">localhost:3001</a></td></tr>
+          <tr><td>jarvis_v1 Dashboard</td><td class="mono">8502</td><td>Streamlit</td></tr>
+          <tr><td>Neo4j</td><td class="mono">7687</td><td>bolt:// — FiestyGoatNeo4j2026!</td></tr>
+          <tr><td>Redis</td><td class="mono">6379</td><td>Coordination layer</td></tr>
+          <tr><td>PostgreSQL</td><td class="mono">5432</td><td>personal_agent_hub (shared v1+v2)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">LLM Inference — Current Setup (Mac Studio M2 Max)</h3>
+      <table class="data-table">
+        <thead><tr><th>Backend</th><th>Command</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>mlx_lm.server</strong> (local primary)</td>
+            <td class="mono small-text">venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000 --host 0.0.0.0</td>
+            <td>Apple Metal native. ~2.7s latency. ⚠️ vLLM 0.14.1 has NO MPS backend — mlx_lm is the correct path on Mac.</td>
+          </tr>
+          <tr>
+            <td><strong>New Rig</strong> (arriving ~2 weeks)</td>
+            <td class="mono small-text">VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8000 --tensor-parallel-size 2</td>
+            <td>Intel Core Ultra 9 + 2x RTX 5060 Ti 16GB = 32GB VRAM. Real vLLM on CUDA.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 16px;">The Codex — Active Quests</h3>
+      <table class="data-table">
+        <thead><tr><th>ID</th><th>Quest</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">QUE-001</td><td>DOL VETS Grant Application</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-002</td><td>AARP Community Challenge</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-003</td><td>Digital Promise K-12 AI Infrastructure ($50K-$250K, Mar 8 deadline)</td><td>Active — FULL CONTEXT SAVED</td></tr>
+          <tr><td class="mono">QUE-004</td><td>WOSB Certification (free, Natalie qualifies)</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-005</td><td>MBE/NMSDC Certification</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-006</td><td>Mercury Bank Sub-Account Setup</td><td>Active</td></tr>
+          <tr><td class="mono">QUE-007</td><td>FiestyGoat AI Architecture Strategy</td><td>Active</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+        API: <span class="mono">GET http://localhost:8000/api/v1/solutions/</span> (requires Codex Docker running — port 8000, trailing slash required)
+      </p>
+    </div>
+  </section>
 
   <!-- ========== HELP ========== -->
   <section id="section-help" class="section active">
