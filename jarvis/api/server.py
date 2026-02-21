@@ -258,6 +258,23 @@ async def resume_confidence(request: ConfidenceResumeRequest) -> dict:
     }
 
 
+@app.get("/api/keys/status")
+async def api_keys_status() -> dict:
+    """Check which cloud LLM API keys are configured (no values exposed)."""
+    import keyring
+    keys = {}
+    for name in ("groq", "openrouter", "grok", "deepseek"):
+        key_name = {"groq": "groq_api_key", "openrouter": "openrouter_api_key",
+                    "grok": "xai_api_key", "deepseek": "deepseek_api_key"}[name]
+        val = None
+        for svc in ("jarvis_v2", "personal-agent-hub", "personal_agent_hub"):
+            val = keyring.get_password(svc, key_name)
+            if val:
+                break
+        keys[name] = bool(val)
+    return keys
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_ui() -> HTMLResponse:
     """LangGraph Admin UI — read-only system overview."""

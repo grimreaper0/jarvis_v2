@@ -1123,6 +1123,7 @@ def get_admin_html(settings=None) -> str:
     <div class="nav-section-label">Get Started</div>
     <button class="nav-item active" onclick="showSection('help')">📖 Help &amp; Concepts</button>
     <button class="nav-item" onclick="showSection('about')">🏠 About BILLY</button>
+    <button class="nav-item" onclick="showSection('services')">🟢 Services &amp; Status</button>
     <button class="nav-item" onclick="showSection('directives')">🎯 Prime Directives</button>
     <button class="nav-item" onclick="showSection('architecture')">🏗️ Architecture</button>
   </div>
@@ -1198,8 +1199,8 @@ def get_admin_html(settings=None) -> str:
         <thead><tr><th>Service</th><th>Port</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><strong>BILLY API (jarvis_v2)</strong></td><td class="mono badge-success-text">8506</td><td>FastAPI — FIXED, never change</td></tr>
-          <tr><td>mlx_lm.server (local LLM)</td><td class="mono">8000</td><td>⚠️ CONFLICTS with Codex backend. Cannot run simultaneously.</td></tr>
-          <tr><td>The Codex — Backend</td><td class="mono">8000</td><td>⚠️ CONFLICTS with MLX. FastAPI, trailing slash required on API calls.</td></tr>
+          <tr><td>mlx_lm.server (local LLM)</td><td class="mono">8001</td><td>Apple Metal inference. mlx-community/Qwen3-4B-4bit</td></tr>
+          <tr><td>The Codex — Backend</td><td class="mono">8000</td><td>FastAPI (Docker), trailing slash required on API calls</td></tr>
           <tr><td>The Codex — Frontend</td><td class="mono">3001</td><td>nginx/React — <a href="http://localhost:3001" style="color:var(--accent)">localhost:3001</a></td></tr>
           <tr><td>jarvis_v1 Dashboard</td><td class="mono">8502</td><td>Streamlit</td></tr>
           <tr><td>Neo4j</td><td class="mono">7687</td><td>bolt:// — FiestyGoatNeo4j2026!</td></tr>
@@ -1216,12 +1217,12 @@ def get_admin_html(settings=None) -> str:
         <tbody>
           <tr>
             <td><strong>mlx_lm.server</strong> (local primary)</td>
-            <td class="mono small-text">venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8000 --host 0.0.0.0</td>
-            <td>Apple Metal native. ~2.7s latency. ⚠️ vLLM 0.14.1 has NO MPS backend — mlx_lm is the correct path on Mac.</td>
+            <td class="mono small-text">venv/bin/python3.13 -m mlx_lm server --model mlx-community/Qwen3-4B-4bit --port 8001 --host 0.0.0.0</td>
+            <td>Apple Metal native. Port 8001. ~1.9s latency. vLLM has NO MPS backend — mlx_lm is the correct path on Mac.</td>
           </tr>
           <tr>
             <td><strong>New Rig</strong> (arriving ~2 weeks)</td>
-            <td class="mono small-text">VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8000 --tensor-parallel-size 2</td>
+            <td class="mono small-text">VLLM_USE_V1=0 vllm serve Qwen/Qwen3-4B --port 8001 --tensor-parallel-size 2</td>
             <td>Intel Core Ultra 9 + 2x RTX 5060 Ti 16GB = 32GB VRAM. Real vLLM on CUDA.</td>
           </tr>
         </tbody>
@@ -1246,6 +1247,125 @@ def get_admin_html(settings=None) -> str:
         API: <span class="mono">GET http://localhost:8000/api/v1/solutions/</span> (requires Codex Docker running — port 8000, trailing slash required)
       </p>
     </div>
+  </section>
+
+  <!-- ========== SERVICES & STATUS ========== -->
+  <section id="section-services" class="section">
+    <h2 class="section-title">🟢 Services &amp; Status</h2>
+    <p class="section-subtitle">All dashboards, inference servers, and infrastructure services. Click any link to open.</p>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">Dashboards &amp; UIs</h3>
+      <table class="data-table">
+        <thead><tr><th>Service</th><th>URL</th><th>Port</th><th>Type</th><th id="dash-status-header">Status</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>BILLY Admin</strong></td>
+            <td><a href="http://localhost:8506/admin" style="color:var(--accent)" target="_blank">localhost:8506/admin</a></td>
+            <td class="mono">8506</td>
+            <td>FastAPI</td>
+            <td class="svc-status" data-url="http://localhost:8506/health">...</td>
+          </tr>
+          <tr>
+            <td><strong>The Codex</strong></td>
+            <td><a href="http://localhost:3001" style="color:var(--accent)" target="_blank">localhost:3001</a></td>
+            <td class="mono">3001</td>
+            <td>React + nginx (Docker)</td>
+            <td class="svc-status" data-url="http://localhost:3001">...</td>
+          </tr>
+          <tr>
+            <td><strong>jarvis_v1 Dashboard</strong></td>
+            <td><a href="http://localhost:8502" style="color:var(--accent)" target="_blank">localhost:8502</a></td>
+            <td class="mono">8502</td>
+            <td>Streamlit</td>
+            <td class="svc-status" data-url="http://localhost:8502">...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">LLM Inference</h3>
+      <table class="data-table">
+        <thead><tr><th>Backend</th><th>URL</th><th>Port</th><th>Model</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>mlx_lm.server</strong> (local primary)</td>
+            <td class="mono">localhost:8001/v1</td>
+            <td class="mono">8001</td>
+            <td>mlx-community/Qwen3-4B-4bit</td>
+            <td class="svc-status" data-url="http://localhost:8001/v1/models">...</td>
+          </tr>
+          <tr>
+            <td><strong>Groq</strong> (cloud free)</td>
+            <td class="mono">api.groq.com</td>
+            <td class="mono">443</td>
+            <td>qwen/qwen3-32b</td>
+            <td id="groq-key-status">...</td>
+          </tr>
+          <tr>
+            <td><strong>OpenRouter</strong> (cloud free)</td>
+            <td class="mono">openrouter.ai</td>
+            <td class="mono">443</td>
+            <td>qwen/qwen3-coder-480b:free</td>
+            <td id="openrouter-key-status">...</td>
+          </tr>
+          <tr>
+            <td><strong>Grok</strong> (xAI)</td>
+            <td class="mono">api.x.ai</td>
+            <td class="mono">443</td>
+            <td>grok-4-fast-reasoning</td>
+            <td id="grok-key-status">...</td>
+          </tr>
+          <tr>
+            <td><strong>DeepSeek</strong> (cloud cheap)</td>
+            <td class="mono">api.deepseek.com</td>
+            <td class="mono">443</td>
+            <td>deepseek-reasoner / deepseek-chat</td>
+            <td id="deepseek-key-status">...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 16px;">Infrastructure</h3>
+      <table class="data-table">
+        <thead><tr><th>Service</th><th>URL</th><th>Port</th><th>Notes</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>PostgreSQL</strong></td>
+            <td class="mono">localhost:5432</td>
+            <td class="mono">5432</td>
+            <td>personal_agent_hub (shared v1 + v2)</td>
+            <td class="svc-status" data-url="http://localhost:8506/health">...</td>
+          </tr>
+          <tr>
+            <td><strong>Redis</strong></td>
+            <td class="mono">localhost:6379</td>
+            <td class="mono">6379</td>
+            <td>Coordination layer + task queues</td>
+            <td class="svc-status" data-url="http://localhost:8506/health">...</td>
+          </tr>
+          <tr>
+            <td><strong>Neo4j</strong></td>
+            <td class="mono">bolt://localhost:7687</td>
+            <td class="mono">7687</td>
+            <td>Knowledge graph</td>
+            <td class="svc-status" data-url="http://localhost:7474">...</td>
+          </tr>
+          <tr>
+            <td><strong>The Codex Backend</strong></td>
+            <td class="mono">localhost:8000</td>
+            <td class="mono">8000</td>
+            <td>FastAPI (Docker) — solutions-catalog</td>
+            <td class="svc-status" data-url="http://localhost:8000/health">...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="font-size:12px;color:var(--text-muted);">Status checks run client-side on page load. Green = reachable, Red = down, Yellow = API key configured but not health-checked.</p>
   </section>
 
   <!-- ========== HELP ========== -->
@@ -1354,6 +1474,99 @@ def get_admin_html(settings=None) -> str:
   TikTok Agent      queue: tiktok_task          trends → hook → script → sounds → quality_gate
   Twitter Agent     queue: twitter_task         research → thread → validate → quality_gate
   Trading Agent     queue: trading_analysis     screen → analyze → score → submit to Tier 2
+    </div>
+
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-header"><h3>Visual Architecture</h3></div>
+      <div id="mermaid-arch"></div>
+      <script>
+        document.addEventListener('DOMContentLoaded', function() {{
+          const diagram = `graph TB
+    subgraph T0["TIER 0 - Orchestration"]
+        JARVIS["JARVIS Controller"]
+        ADMIN["Admin UI :8506"]
+        API["FastAPI API :8506"]
+    end
+
+    subgraph T1["TIER 1 - ContinuousWorkers"]
+        LW["LearningWorker"]
+        RW["ResearchWorker"]
+        TW["TradingWorker"]
+        HW["HealthWorker"]
+    end
+
+    subgraph T2["TIER 2 - LangGraph StateGraphs"]
+        RG["Revenue Graph"]
+        TG["Trading Graph"]
+        CG["Content Gate"]
+        CONF["Confidence Graph"]
+    end
+
+    subgraph T3["TIER 3 - Specialist Agents"]
+        IG["Instagram"]
+        YT["YouTube"]
+        NL["Newsletter"]
+        SEO["SEO Blog"]
+        TK["TikTok"]
+        TW2["Twitter"]
+        TA["Trading Analyst"]
+    end
+
+    subgraph INFRA["Infrastructure"]
+        PG["PostgreSQL :5432"]
+        REDIS["Redis :6379"]
+        NEO["Neo4j :7687"]
+        MLX["mlx_lm :8001"]
+        CLOUD["Cloud LLMs"]
+    end
+
+    T0 -->|"Redis Queues"| T1
+    T1 -->|"push_task_to_graph"| T2
+    T2 -->|"Redis task queues"| T3
+
+    T1 --> MLX
+    T2 --> MLX
+    T3 --> MLX
+    T1 -.->|"fallback"| CLOUD
+    T2 -.->|"fallback"| CLOUD
+    T3 -.->|"fallback"| CLOUD
+    T1 --> PG
+    T2 --> PG
+    T3 --> PG
+    T0 --> REDIS
+    T1 --> REDIS
+    T2 --> REDIS
+    T2 --> NEO
+    T3 --> NEO
+
+    RG --> IG
+    RG --> YT
+    RG --> NL
+    RG --> SEO
+    RG --> TK
+    RG --> TW2
+    TG --> TA
+    CG --> T3
+
+    classDef tier0 fill:#831843,stroke:#f472b6,color:#fce7f3
+    classDef tier1 fill:#78350f,stroke:#f59e0b,color:#fef3c7
+    classDef tier2 fill:#312e81,stroke:#6366f1,color:#e0e7ff
+    classDef tier3 fill:#14532d,stroke:#22c55e,color:#dcfce7
+    classDef infra fill:#1e293b,stroke:#64748b,color:#e2e8f0
+
+    class JARVIS,ADMIN,API tier0
+    class LW,RW,TW,HW tier1
+    class RG,TG,CG,CONF tier2
+    class IG,YT,NL,SEO,TK,TW2,TA tier3
+    class PG,REDIS,NEO,MLX,CLOUD infra`;
+
+          mermaid.render('mermaid-svg', diagram).then(function(result) {{
+            document.getElementById('mermaid-arch').innerHTML = result.svg;
+          }}).catch(function(err) {{
+            document.getElementById('mermaid-arch').innerHTML = '<pre style="color:#ef4444;">Mermaid error: ' + err.message + '</pre>';
+          }});
+        }});
+      </script>
     </div>
 
     <div class="card">
@@ -1572,13 +1785,65 @@ llm = router.as_langchain_llm()   # returns OllamaLLM</pre>
 
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script>
+  mermaid.initialize({{ startOnLoad: true, theme: 'dark', themeVariables: {{
+    primaryColor: '#6366f1', primaryTextColor: '#e2e8f0',
+    lineColor: '#64748b', background: '#0f172a',
+    mainBkg: '#1e293b', nodeBorder: '#6366f1'
+  }} }});
+
   function showSection(name) {{
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     document.getElementById('section-' + name).classList.add('active');
     event.currentTarget.classList.add('active');
   }}
+
+  // Live health checks for Services panel
+  async function checkServices() {{
+    document.querySelectorAll('.svc-status').forEach(async (td) => {{
+      const url = td.getAttribute('data-url');
+      if (!url) return;
+      try {{
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 3000);
+        const resp = await fetch(url, {{ mode: 'no-cors', signal: ctrl.signal }});
+        td.textContent = '🟢 UP';
+        td.style.color = '#22c55e';
+      }} catch (e) {{
+        td.textContent = '🔴 DOWN';
+        td.style.color = '#ef4444';
+      }}
+    }});
+
+    // Cloud API key status — hit BILLY's own /health endpoint which knows key state
+    try {{
+      const resp = await fetch('/api/keys/status');
+      if (resp.ok) {{
+        const data = await resp.json();
+        ['groq', 'openrouter', 'grok', 'deepseek'].forEach(k => {{
+          const el = document.getElementById(k + '-key-status');
+          if (el && data[k]) {{
+            el.textContent = '🟡 KEY SET';
+            el.style.color = '#f59e0b';
+          }} else if (el) {{
+            el.textContent = '⚪ NO KEY';
+            el.style.color = '#64748b';
+          }}
+        }});
+      }}
+    }} catch (e) {{
+      // key status endpoint not available yet — show unknown
+      ['groq', 'openrouter', 'grok', 'deepseek'].forEach(k => {{
+        const el = document.getElementById(k + '-key-status');
+        if (el) {{ el.textContent = '⚪ UNKNOWN'; el.style.color = '#64748b'; }}
+      }});
+    }}
+  }}
+
+  // Run on load
+  checkServices();
 </script>
 </body>
 </html>"""
